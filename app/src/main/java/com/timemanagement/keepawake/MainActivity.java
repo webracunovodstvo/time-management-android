@@ -7,8 +7,10 @@ import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.provider.Settings;
 import android.text.InputType;
 import android.view.Gravity;
 import android.view.ViewGroup;
@@ -22,6 +24,7 @@ public class MainActivity extends Activity {
     private Button start, stop;
     private int pendingInterval = 5;
     private boolean receiverRegistered = false;
+    private boolean waitingForOverlayPermission = false;
 
     private final BroadcastReceiver receiver = new BroadcastReceiver() {
         @Override public void onReceive(Context context, Intent intent) {
@@ -49,6 +52,18 @@ public class MainActivity extends Activity {
             receiverRegistered = true;
         }
         loadState();
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        if (waitingForOverlayPermission) {
+            waitingForOverlayPermission = false;
+            if (Settings.canDrawOverlays(this)) {
+                continueStartFlow();
+            } else {
+                toast("Display over other apps permission is required for the keep-awake overlay.");
+            }
+        }
     }
 
     @Override protected void onStop() {
@@ -114,7 +129,10 @@ public class MainActivity extends Activity {
         start.setOnClickListener(v -> startPressed());
         stop.setOnClickListener(v -> stopPressed());
 
-        TextView note = text("Keeps the screen awake while this app is open and the session is running. A foreground service keeps the session active in the background.", 12, Color.rgb(107,114,128), false);
+        TextView note = text(
+            "A small semi-transparent TM overlay stays above other apps and keeps the screen awake while the session is running. The overlay does not receive taps.",
+            12, Color.rgb(107,114,128), false
+        );
         root.addView(note, lpTop(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, 18));
         return root;
     }
@@ -126,11 +144,25 @@ public class MainActivity extends Activity {
         if (value < 1 || value > 3600) { toast("Enter 1 to 3600 seconds."); return; }
         pendingInterval = value;
 
-        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+        if (!Settings.canDrawOverlays(this)) {
+            waitingForOverlayPermission = true;
+            Intent i = new Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:" + getPackageName())
+            );
+            startActivity(i);
+            return;
+        }
+        continueStartFlow();
+    }
+
+    private void continueStartFlow() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIFICATIONS);
             return;
         }
-        startSession(value);
+        startSession(pendingInterval);
     }
 
     private void startSession(int seconds) {
@@ -149,14 +181,22 @@ public class MainActivity extends Activity {
 
     @Override public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grants) {
         super.onRequestPermissionsResult(requestCode, permissions, grants);
-        if (requestCode == REQ_NOTIFICATIONS && grants.length > 0 && grants[0] == PackageManager.PERMISSION_GRANTED) startSession(pendingInterval);
-        else if (requestCode == REQ_NOTIFICATIONS) toast("Notification permission is required while the background session is active.");
+        if (requestCode == REQ_NOTIFICATIONS && grants.length > 0 &&
+            grants[0] == PackageManager.PERMISSION_GRANTED) {
+            startSession(pendingInterval);
+        } else if (requestCode == REQ_NOTIFICATIONS) {
+            toast("Notification permission is required while the background session is active.");
+        }
     }
 
     private void loadState() {
         SharedPreferences p = getSharedPreferences(KeepAwakeService.PREFS, MODE_PRIVATE);
         int i = p.getInt(KeepAwakeService.PREF_INTERVAL, 5);
-        applyState(p.getBoolean(KeepAwakeService.PREF_RUNNING,false), i, p.getInt(KeepAwakeService.PREF_REMAINING,i));
+        applyState(
+            p.getBoolean(KeepAwakeService.PREF_RUNNING,false),
+            i,
+            p.getInt(KeepAwakeService.PREF_REMAINING,i)
+        );
     }
 
     private void applyState(boolean running, int seconds, int remaining) {
@@ -168,34 +208,58 @@ public class MainActivity extends Activity {
         stop.setEnabled(running);
         status.setText(running ? "RUNNING" : "READY");
         status.setTextColor(running ? Color.rgb(21,128,61) : Color.rgb(75,85,99));
-        status.setBackground(round(running ? Color.rgb(240,253,244) : Color.rgb(229,231,235),999));
+        status.setBackground(round(
+            running ? Color.rgb(240,253,244) : Color.rgb(229,231,235), 999
+        ));
         if (running) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }
 
     private int safeInterval() {
-        try { return Math.max(1, Math.min(3600, Integer.parseInt(interval.getText().toString().trim()))); }
-        catch (Exception e) { return 5; }
+        try {
+            return Math.max(1, Math.min(3600,
+                Integer.parseInt(interval.getText().toString().trim())));
+        } catch (Exception e) { return 5; }
     }
 
     private TextView text(String s, int sp, int color, boolean bold) {
-        TextView v = new TextView(this); v.setText(s); v.setTextSize(sp); v.setTextColor(color);
-        if (bold) v.setTypeface(Typeface.DEFAULT, Typeface.BOLD); return v;
+        TextView v = new TextView(this);
+        v.setText(s);
+        v.setTextSize(sp);
+        v.setTextColor(color);
+        if (bold) v.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        return v;
     }
 
     private Button button(String label, int fg, int bg) {
-        Button b = new Button(this); b.setText(label); b.setAllCaps(false); b.setTextSize(16);
-        b.setTypeface(Typeface.DEFAULT, Typeface.BOLD); b.setTextColor(fg); b.setBackground(round(bg,16)); return b;
+        Button b = new Button(this);
+        b.setText(label);
+        b.setAllCaps(false);
+        b.setTextSize(16);
+        b.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        b.setTextColor(fg);
+        b.setBackground(round(bg,16));
+        return b;
     }
 
     private LinearLayout.LayoutParams lpTop(int w, int h, int top) {
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(w,h); p.topMargin = dp(top); return p;
+        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(w,h);
+        p.topMargin = dp(top);
+        return p;
     }
 
     private GradientDrawable round(int color, int radius) {
-        GradientDrawable g = new GradientDrawable(); g.setColor(color); g.setCornerRadius(dp(radius)); return g;
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(color);
+        g.setCornerRadius(dp(radius));
+        return g;
     }
 
-    private int dp(int n) { return Math.round(n * getResources().getDisplayMetrics().density); }
-    private void toast(String s) { Toast.makeText(this,s,Toast.LENGTH_SHORT).show(); }
+    private int dp(int n) {
+        return Math.round(n * getResources().getDisplayMetrics().density);
+    }
+
+    private void toast(String s) {
+        Toast.makeText(this,s,Toast.LENGTH_SHORT).show();
+    }
 }
