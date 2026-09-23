@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="tm_background">#F4F6FA</color>
+    <color name="tm_surface">#FFFFFF</color>
+    <color name="tm_primary">#2563EB</color>
+    <color name="tm_primary_dark">#1D4ED8</color>
+    <color name="tm_text">#111827</color>
+    <color name="tm_muted">#6B7280</color>
+    <color name="tm_success">#15803D</color>
+    <color name="tm_danger">#B91C1C</color>
+</resources>
