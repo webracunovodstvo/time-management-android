@@ -8,6 +8,7 @@ object AppPrefs {
     const val KEY_LAST_HEARD = "last_heard"
     const val KEY_LAST_MATCH = "last_match"
     const val KEY_LAST_WAKE = "last_wake"
+    const val KEY_NAME_DEBUG = "name_debug"
     const val KEY_SERVICE_RUNNING = "service_running"
     const val KEY_PENDING_SPOKEN = "pending_spoken"
     const val KEY_WAKE_ALIASES = "wake_aliases"
@@ -28,6 +29,10 @@ object AppPrefs {
 
     fun setLastWake(context: Context, value: String) {
         prefs(context).edit().putString(KEY_LAST_WAKE, value).apply()
+    }
+
+    fun setNameDebug(context: Context, value: String) {
+        prefs(context).edit().putString(KEY_NAME_DEBUG, value).apply()
     }
 
     fun setRunning(context: Context, running: Boolean) {
