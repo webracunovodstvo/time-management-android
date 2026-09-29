@@ -32,6 +32,8 @@ class VoiceDialService : Service() {
     @Volatile private var running = false
     @Volatile private var trainRemaining = 0
     @Volatile private var nameInferencePending = false
+    private var pendingSpoken: String? = null
+    private var pendingCandidates: List<ContactPhone> = emptyList()
 
     private val audioExecutor = Executors.newSingleThreadExecutor()
     private val inferenceExecutor = Executors.newSingleThreadExecutor()
@@ -66,6 +68,7 @@ class VoiceDialService : Service() {
 
         when (action) {
             ACTION_TRAIN_WAKE -> {
+                clearPendingChoice()
                 acousticWakeStore.clear()
                 mode = Mode.TRAIN_WAKE
                 nameInferencePending = false
@@ -75,6 +78,7 @@ class VoiceDialService : Service() {
                 AppPrefs.setStatus(this, if (wasRunning) "Trening: reci ‘Halo telefon’ 1/5" else "Pokrećem trening…")
             }
             ACTION_TEST_NAME -> {
+                clearPendingChoice()
                 mode = Mode.WAIT_NAME
                 nameInferencePending = false
                 segmentQueue.clear()
@@ -219,9 +223,15 @@ class VoiceDialService : Service() {
 
                         if (nameSegmenter.timedOut) {
                             nameSegmenter.reset()
+                            val wasClarifying = pendingCandidates.isNotEmpty()
+                            clearPendingChoice()
                             mode = Mode.WAIT_WAKE
                             observedMode = mode
-                            AppPrefs.setStatus(this, "Nisam čuo ime. Reci ponovo ‘Halo telefon’.")
+                            AppPrefs.setStatus(
+                                this,
+                                if (wasClarifying) "Nisam čuo prezime. Reci ponovo ‘Halo telefon’."
+                                else "Nisam čuo ime. Reci ponovo ‘Halo telefon’."
+                            )
                             AppPrefs.setNameDebug(this, "Timeout: govor nije detektovan u 5 s")
                             updateServiceNotification("Slušam: ‘Halo telefon’")
                             beepError()
@@ -270,7 +280,7 @@ class VoiceDialService : Service() {
                     val rawSeconds = audio.size / SAMPLE_RATE.toDouble()
                     val padded = padForWhisper(audio)
                     val paddedSeconds = padded.size / SAMPLE_RATE.toDouble()
-                    val contacts = getContacts()
+                    val contacts = if (pendingCandidates.isNotEmpty()) pendingCandidates else getContacts()
                     val prompt = buildContactPrompt()
 
                     val started = SystemClock.elapsedRealtime()
@@ -303,7 +313,13 @@ class VoiceDialService : Service() {
                     }
 
                     AppPrefs.setLastHeard(this, text)
-                    handleName(text, contacts)
+                    val previous = pendingSpoken
+                    val forms = if (previous.isNullOrBlank()) {
+                        listOf(text)
+                    } else {
+                        listOf(text, "$previous $text")
+                    }
+                    handleNameForms(forms, contacts)
                 }
             }
         }
@@ -323,6 +339,7 @@ class VoiceDialService : Service() {
         )
         if (!result.matched) return
 
+        clearPendingChoice()
         mode = Mode.WAIT_NAME
         nameInferencePending = false
         segmentQueue.clear()
@@ -359,18 +376,19 @@ class VoiceDialService : Service() {
         }
     }
 
-    private fun handleName(text: String, contacts: List<ContactPhone>) {
-        mode = Mode.WAIT_WAKE
+    private fun handleNameForms(forms: List<String>, contacts: List<ContactPhone>) {
         nameInferencePending = false
-        updateServiceNotification("Slušam: ‘Halo telefon’")
         AppPrefs.setStatus(this, "Tražim kontakt…")
 
-        val ranked = ContactMatcher(learningStore).rank(text, contacts, 3)
+        val ranked = ContactMatcher(learningStore).rankBestOf(forms, contacts, 5)
         val best = ranked.getOrNull(0)
         val second = ranked.getOrNull(1)
 
         if (best == null || best.score < 0.58) {
-            fail("Nisam našao dovoljno sličan kontakt za: $text")
+            clearPendingChoice()
+            mode = Mode.WAIT_WAKE
+            updateServiceNotification("Slušam: ‘Halo telefon’")
+            fail("Nisam našao dovoljno sličan kontakt za: ${forms.lastOrNull().orEmpty()}")
             return
         }
 
@@ -380,9 +398,20 @@ class VoiceDialService : Service() {
 
         if (learnedStrong || strong) {
             if (checkSelfPermission(Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) {
+                clearPendingChoice()
+                mode = Mode.WAIT_WAKE
                 fail("Nema dozvole za pozivanje")
                 return
             }
+
+            val learnedPhrase = forms.lastOrNull().orEmpty()
+            if (learnedPhrase.isNotBlank()) {
+                runCatching { learningStore.record(learnedPhrase, best.contact.lookupKey) }
+            }
+
+            clearPendingChoice()
+            mode = Mode.WAIT_WAKE
+            updateServiceNotification("Slušam: ‘Halo telefon’")
             AppPrefs.setLastMatch(
                 this,
                 "${best.contact.displayName} (${"%.0f".format(best.score * 100)}%)"
@@ -393,16 +422,49 @@ class VoiceDialService : Service() {
             return
         }
 
-        AppPrefs.prefs(this).edit().putString(AppPrefs.KEY_PENDING_SPOKEN, text).apply()
+        if (pendingCandidates.isEmpty()) {
+            pendingSpoken = forms.firstOrNull().orEmpty()
+            pendingCandidates = ranked.map { it.contact }
+
+            AppPrefs.setLastMatch(
+                this,
+                ranked.take(3).joinToString(" • ") {
+                    "${it.contact.displayName} ${"%.0f".format(it.score * 100)}%"
+                }
+            )
+            AppPrefs.setStatus(this, "Više kontakata. Posle tona reci prezime ili puno ime.")
+            AppPrefs.setNameDebug(
+                this,
+                "Prvi rezultat nije jedinstven • čekam dopunu imena"
+            )
+
+            mode = Mode.WAIT_NAME
+            segmentQueue.clear()
+            updateServiceNotification("Reci prezime ili puno ime")
+            beepClarify()
+            return
+        }
+
+        val spokenForLearning = forms.joinToString(" ")
+        AppPrefs.prefs(this).edit().putString(AppPrefs.KEY_PENDING_SPOKEN, spokenForLearning).apply()
         AppPrefs.setLastMatch(
             this,
-            ranked.joinToString(" • ") {
+            ranked.take(3).joinToString(" • ") {
                 "${it.contact.displayName} ${"%.0f".format(it.score * 100)}%"
             }
         )
-        AppPrefs.setStatus(this, "Nisam potpuno siguran. Izaberi kontakt iz obaveštenja.")
-        postCandidateNotification(text, ranked.take(2))
+
+        clearPendingChoice()
+        mode = Mode.WAIT_WAKE
+        updateServiceNotification("Slušam: ‘Halo telefon’")
+        AppPrefs.setStatus(this, "I dalje nisam potpuno siguran. Izaberi kontakt iz obaveštenja.")
+        postCandidateNotification(spokenForLearning, ranked.take(2))
         beepError()
+    }
+
+    private fun clearPendingChoice() {
+        pendingSpoken = null
+        pendingCandidates = emptyList()
     }
 
     private fun loadContactsSafely(): List<ContactPhone> {
@@ -466,6 +528,11 @@ class VoiceDialService : Service() {
     private fun beepReady() {
         ignoreAudioUntilMs = SystemClock.elapsedRealtime() + 180
         tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 110)
+    }
+
+    private fun beepClarify() {
+        ignoreAudioUntilMs = SystemClock.elapsedRealtime() + 320
+        tone?.startTone(ToneGenerator.TONE_PROP_BEEP2, 180)
     }
 
     private fun beepSuccess() {
