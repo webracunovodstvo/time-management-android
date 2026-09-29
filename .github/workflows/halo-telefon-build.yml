@@ -1,0 +1,74 @@
+name: Build Halo Telefon APK
+
+on:
+  push:
+    branches:
+      - halo-telefon-build
+    paths:
+      - "halo_source_parts/**"
+      - ".github/workflows/halo-telefon-build.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout build branch
+        uses: actions/checkout@v4
+
+      - name: Reconstruct Halo Telefon source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/halo-src
+          cat halo_source_parts/part*.b64 | base64 --decode > /tmp/HaloTelefon-source.zip
+          unzip -t /tmp/HaloTelefon-source.zip
+          unzip -q /tmp/HaloTelefon-source.zip -d /tmp/halo-src
+          test -f /tmp/halo-src/HaloTelefon/settings.gradle.kts
+          test -f /tmp/halo-src/HaloTelefon/app/src/main/AndroidManifest.xml
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"             "platforms;android-35"             "build-tools;35.0.0"             "ndk;27.0.12077973"             "cmake;3.22.1"
+
+      - name: Prepare whisper.cpp and Tiny Serbian-capable model
+        working-directory: /tmp/halo-src/HaloTelefon
+        shell: bash
+        run: |
+          chmod +x scripts/setup.sh
+          bash scripts/setup.sh
+
+      - name: Build debug APK
+        working-directory: /tmp/halo-src/HaloTelefon
+        shell: bash
+        run: |
+          gradle :app:assembleDebug --stacktrace --no-daemon
+
+      - name: Collect APK
+        shell: bash
+        run: |
+          cp /tmp/halo-src/HaloTelefon/app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/HaloTelefon-debug.apk"
+          ls -lh "$GITHUB_WORKSPACE/HaloTelefon-debug.apk"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: HaloTelefon-debug-apk
+          path: HaloTelefon-debug.apk
+          if-no-files-found: error
