@@ -2,14 +2,17 @@ package rs.halotelefon
 
 import android.Manifest
 import android.app.Activity
+import android.app.NotificationManager
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -27,6 +30,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private lateinit var debugValue: TextView
     private lateinit var matchValue: TextView
     private lateinit var keepAwakeSwitch: Switch
+    private var fullScreenButton: Button? = null
 
     private val bg = Color.rgb(247, 247, 252)
     private val surface = Color.WHITE
@@ -51,10 +55,10 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         window.statusBarColor = bg
         window.navigationBarColor = bg
         prefs = AppPrefs.prefs(this)
-        if (prefs.getInt("ui_migration", 0) < 5) {
+        if (prefs.getInt("ui_migration", 0) < 8) {
             prefs.edit()
-                .putBoolean(AppPrefs.KEY_KEEP_AWAKE, false)
-                .putInt("ui_migration", 5)
+                .putBoolean(AppPrefs.KEY_KEEP_AWAKE, true)
+                .putInt("ui_migration", 8)
                 .apply()
         }
         prefs.registerOnSharedPreferenceChangeListener(this)
@@ -193,13 +197,13 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             orientation = LinearLayout.VERTICAL
         }
         texts.addView(TextView(this).apply {
-            text = "Pouzdanije sa ugašenim ekranom"
+            text = "Rad sa ugašenim ekranom"
             textSize = 16f
             setTextColor(ink)
             setTypeface(typeface, Typeface.BOLD)
         })
         texts.addView(TextView(this).apply {
-            text = "Isključeno štedi bateriju. Uključi samo ako telefon uspava slušanje."
+            text = "Wake lock se uključuje samo dok je ekran ugašen, a gasi čim se ekran upali."
             textSize = 13f
             setTextColor(muted)
             setPadding(0, dp(3), dp(8), 0)
@@ -212,13 +216,35 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
                 prefs.edit().putBoolean(AppPrefs.KEY_KEEP_AWAKE, checked).apply()
                 Toast.makeText(
                     this@MainActivity,
-                    "Podešavanje važi pri sledećem pokretanju slušanja.",
+                    if (checked) "Rad sa ugašenim ekranom je uključen." else "Rad sa ugašenim ekranom može biti nepouzdan.",
                     Toast.LENGTH_SHORT
                 ).show()
             }
         }
         row.addView(keepAwakeSwitch)
         settingsCard.addView(row)
+
+        if (Build.VERSION.SDK_INT >= 34) {
+            fullScreenButton = Button(this).apply {
+                text = "Omogući izbor preko zaključanog ekrana"
+                isAllCaps = false
+                textSize = 14f
+                setTypeface(typeface, Typeface.BOLD)
+                setTextColor(accent)
+                background = outlined(surface, accent, 16f)
+                setOnClickListener {
+                    startActivity(
+                        Intent(
+                            Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
+                            Uri.parse("package:" + packageName)
+                        )
+                    )
+                }
+            }
+            settingsCard.addView(fullScreenButton, LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, dp(48)
+            ).apply { topMargin = dp(12) })
+        }
 
         root.addView(settingsCard, LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
@@ -276,7 +302,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         }
 
         root.addView(TextView(this).apply {
-            text = "v0.7  •  Glasovno razrešavanje sličnih kontakata • 100% lokalno."
+            text = "v0.8  •  Veliki izbor kontakta • redosled uči tvoje izbore • 100% lokalno."
             textSize = 12f
             setTextColor(muted)
             gravity = Gravity.CENTER
@@ -333,6 +359,19 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         heardValue.text = prefs.getString(AppPrefs.KEY_LAST_HEARD, "Još ništa")
         debugValue.text = prefs.getString(AppPrefs.KEY_NAME_DEBUG, "Još nema testa imena")
         matchValue.text = prefs.getString(AppPrefs.KEY_LAST_MATCH, "Još nema izbora")
+        refreshFullScreenPermission()
+    }
+
+    private fun refreshFullScreenPermission() {
+        if (Build.VERSION.SDK_INT < 34) return
+        val manager = getSystemService(NotificationManager::class.java)
+        fullScreenButton?.visibility =
+            if (manager.canUseFullScreenIntent()) View.GONE else View.VISIBLE
+    }
+
+    override fun onResume() {
+        super.onResume()
+        refreshFullScreenPermission()
     }
 
     private fun ensurePermissions(): Boolean {
