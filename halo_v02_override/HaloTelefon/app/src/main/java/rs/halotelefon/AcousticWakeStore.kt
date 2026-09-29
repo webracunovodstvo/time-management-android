@@ -226,7 +226,8 @@ private object WakeFeatures {
             val ts = prevSteps; prevSteps = currSteps; currSteps = ts
         }
         val steps = prevSteps[m].coerceAtLeast(1)
-        return prev[m] / steps
+        val value = prev[m] / steps
+        return if (!value.isFinite() || value > 10.0) 99.0 else value
     }
 
     private fun cosineDistance(a: FloatArray, b: FloatArray): Double {
