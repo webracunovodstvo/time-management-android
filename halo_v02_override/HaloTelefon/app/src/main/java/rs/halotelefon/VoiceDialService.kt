@@ -42,7 +42,7 @@ class VoiceDialService : Service() {
     private lateinit var whisper: WhisperContext
     private lateinit var acousticWakeStore: AcousticWakeStore
     private lateinit var learningStore: LearningStore
-    private var contactCache: List<PhoneContact>? = null
+    private var contactCache: List<ContactPhone>? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var tone: ToneGenerator? = null
     private var noiseSuppressor: NoiseSuppressor? = null
@@ -345,7 +345,7 @@ class VoiceDialService : Service() {
         }
     }
 
-    private fun handleName(text: String, contacts: List<PhoneContact>) {
+    private fun handleName(text: String, contacts: List<ContactPhone>) {
         mode = Mode.WAIT_WAKE
         nameInferencePending = false
         updateServiceNotification("Slušam: ‘Halo telefon’")
@@ -391,20 +391,20 @@ class VoiceDialService : Service() {
         beepError()
     }
 
-    private fun loadContactsSafely(): List<PhoneContact> {
+    private fun loadContactsSafely(): List<ContactPhone> {
         if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
             return emptyList()
         }
         return ContactRepository(contentResolver).load()
     }
 
-    private fun getContacts(): List<PhoneContact> {
+    private fun getContacts(): List<ContactPhone> {
         val cached = contactCache
         if (!cached.isNullOrEmpty()) return cached
         return loadContactsSafely().also { contactCache = it }
     }
 
-    private fun buildContactPrompt(contacts: List<PhoneContact>): String {
+    private fun buildContactPrompt(contacts: List<ContactPhone>): String {
         val unique = LinkedHashSet<String>()
         for (contact in contacts) {
             val name = contact.displayName.trim()
