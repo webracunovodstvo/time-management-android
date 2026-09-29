@@ -19,6 +19,7 @@ class VoiceDialService : Service() {
     companion object {
         const val ACTION_STOP = "rs.halotelefon.STOP"
         const val ACTION_TRAIN_WAKE = "rs.halotelefon.TRAIN_WAKE"
+        const val ACTION_TEST_NAME = "rs.halotelefon.TEST_NAME"
         private const val CHANNEL_ID = "halo_voice"
         private const val NOTIFICATION_ID = 1001
         private const val CANDIDATE_NOTIFICATION_ID = 1002
@@ -55,27 +56,43 @@ class VoiceDialService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (intent?.action == ACTION_STOP) {
+        val action = intent?.action
+        if (action == ACTION_STOP) {
             stopSelf()
             return START_NOT_STICKY
         }
 
         val wasRunning = running
-        if (!running) startVoiceEngine()
 
-        if (intent?.action == ACTION_TRAIN_WAKE) {
-            acousticWakeStore.clear()
-            mode = Mode.TRAIN_WAKE
-            nameInferencePending = false
-            trainRemaining = 5
-            segmentQueue.clear()
-            AppPrefs.setLastWake(this, "Novi lokalni audio profil: 0/5")
-            AppPrefs.setStatus(
-                this,
-                if (wasRunning) "Trening: reci ‘Halo telefon’ 1/5"
-                else "Pokrećem model za trening…"
-            )
-            if (wasRunning) beepReady()
+        when (action) {
+            ACTION_TRAIN_WAKE -> {
+                acousticWakeStore.clear()
+                mode = Mode.TRAIN_WAKE
+                nameInferencePending = false
+                trainRemaining = 5
+                segmentQueue.clear()
+                AppPrefs.setLastWake(this, "Novi lokalni audio profil: 0/5")
+                AppPrefs.setStatus(this, if (wasRunning) "Trening: reci ‘Halo telefon’ 1/5" else "Pokrećem trening…")
+            }
+            ACTION_TEST_NAME -> {
+                mode = Mode.WAIT_NAME
+                nameInferencePending = false
+                segmentQueue.clear()
+                AppPrefs.setStatus(this, "Test imena. Posle tona reci ime i prezime.")
+                AppPrefs.setNameDebug(this, "Direktan test imena, wake je preskočen")
+            }
+        }
+
+        if (!running) {
+            startVoiceEngine()
+        } else {
+            when (action) {
+                ACTION_TRAIN_WAKE -> beepReady()
+                ACTION_TEST_NAME -> {
+                    updateServiceNotification("Test: reci ime kontakta")
+                    beepReady()
+                }
+            }
         }
         return START_NOT_STICKY
     }
@@ -96,23 +113,30 @@ class VoiceDialService : Service() {
                 contactCache = loadContactsSafely()
                 initRecorder()
 
-                if (mode == Mode.TRAIN_WAKE) {
-                    AppPrefs.setStatus(this, "Trening: reci ‘Halo telefon’ 1/5")
-                    updateServiceNotification("Trening wake profila")
-                } else {
-                    AppPrefs.setStatus(
-                        this,
-                        if (acousticWakeStore.isReady()) "Aktivno. Reci ‘Halo telefon’."
-                        else "Prvo nauči ‘Halo telefon’ 5x."
-                    )
-                    updateServiceNotification(
-                        if (acousticWakeStore.isReady()) "Slušam: ‘Halo telefon’"
-                        else "Čeka trening wake fraze"
-                    )
+                when (mode) {
+                    Mode.TRAIN_WAKE -> {
+                        AppPrefs.setStatus(this, "Trening: reci ‘Halo telefon’ 1/5")
+                        updateServiceNotification("Trening wake profila")
+                    }
+                    Mode.WAIT_NAME -> {
+                        AppPrefs.setStatus(this, "Test imena. Posle tona reci ime i prezime.")
+                        updateServiceNotification("Test: reci ime kontakta")
+                    }
+                    Mode.WAIT_WAKE -> {
+                        AppPrefs.setStatus(
+                            this,
+                            if (acousticWakeStore.isReady()) "Aktivno. Reci ‘Halo telefon’."
+                            else "Prvo nauči ‘Halo telefon’ 5x."
+                        )
+                        updateServiceNotification(
+                            if (acousticWakeStore.isReady()) "Slušam: ‘Halo telefon’"
+                            else "Čeka trening wake fraze"
+                        )
+                    }
                 }
 
                 startRecordingLoop()
-                if (mode == Mode.TRAIN_WAKE) beepReady()
+                if (mode == Mode.TRAIN_WAKE || mode == Mode.WAIT_NAME) beepReady()
                 startInferenceLoop()
             } catch (t: Throwable) {
                 AppPrefs.setStatus(this, "Greška: ${t.message}")
