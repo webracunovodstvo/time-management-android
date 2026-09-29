@@ -16,6 +16,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     private lateinit var status: TextView
     private lateinit var wake: TextView
     private lateinit var heard: TextView
+    private lateinit var debug: TextView
     private lateinit var match: TextView
     private lateinit var prefs: SharedPreferences
 
@@ -49,7 +50,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
             setTextColor(Color.BLACK)
         })
         root.addView(TextView(this).apply {
-            text = "100% lokalni srpski glasovni pozivi"
+            text = "v0.3 • lokalni srpski glasovni pozivi"
             textSize = 17f
             setPadding(0, 8, 0, 8)
         })
@@ -63,29 +64,33 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         status = label(root, "Status", 20f)
         wake = label(root, "Wake profil / poslednji pokušaj", 15f)
         heard = label(root, "Poslednje prepoznato ime", 16f)
+        debug = label(root, "Dijagnostika imena", 14f)
         match = label(root, "Kontakt", 16f)
 
-        val start = button("Uključi glasovno pozivanje") {
+        root.addView(button("Uključi glasovno pozivanje") {
             if (ensurePermissions()) {
                 startForegroundService(Intent(this, VoiceDialService::class.java))
             }
-        }
-        root.addView(start)
+        })
 
         root.addView(button("Nauči moj izgovor ‘Halo telefon’ (5x)") {
             if (ensurePermissions()) {
                 startForegroundService(
-                    Intent(this, VoiceDialService::class.java).setAction(VoiceDialService.ACTION_TRAIN_WAKE)
+                    Intent(this, VoiceDialService::class.java)
+                        .setAction(VoiceDialService.ACTION_TRAIN_WAKE)
                 )
             }
         })
 
         root.addView(button("Zaustavi slušanje") {
-            startService(Intent(this, VoiceDialService::class.java).setAction(VoiceDialService.ACTION_STOP))
+            startService(
+                Intent(this, VoiceDialService::class.java)
+                    .setAction(VoiceDialService.ACTION_STOP)
+            )
         })
 
         root.addView(TextView(this).apply {
-            text = "Kako radi\n\n1. Prvo pritisni ‘Nauči moj izgovor’ i pet puta izgovori samo: Halo telefon. Svaki prihvaćen uzorak mora da promeni brojač 1/5, 2/5…\n2. Uključi glasovno pozivanje. Wake fraza se tada poredi sa tvojim lokalnim audio profilom, bez pretvaranja u tekst.\n3. Kada čuješ kratak ton, reci ime ili ime i prezime. Tek tada se lokalno pokreće Base Whisper za srpski.\n4. Ako je pogodak siguran, telefon poziva. Ako nije, dobićeš dva izbora, a tvoj izbor se lokalno pamti.\n\nAplikacija nema INTERNET dozvolu. Posle restarta telefona slušanje moraš ponovo ručno uključiti zbog Android ograničenja za mikrofon u pozadini."
+            text = "Test v0.3\n\n1. Wake profil možeš da zadržiš ako je već naučen.\n2. Reci ‘Halo telefon’.\n3. Posle kratkog tona reci ime normalnom jačinom.\n4. Status mora odmah da pređe na ‘Čujem ime…’, pa na ‘Prepoznajem ime…’.\n5. Ako ne pozove kontakt, pogledaj ‘Dijagnostika imena’. Tu piše da li je mikrofon snimio ime, koliko sekundi i šta je Whisper vratio.\n\nAplikacija nema INTERNET dozvolu."
             textSize = 15f
             setPadding(0, 40, 0, 24)
             setLineSpacing(0f, 1.15f)
@@ -122,10 +127,16 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
     }
 
     private fun ensurePermissions(): Boolean {
-        val missing = requiredPermissions.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        val missing = requiredPermissions.filter {
+            checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED
+        }
         if (missing.isNotEmpty()) {
             requestPermissions(missing.toTypedArray(), 42)
-            Toast.makeText(this, "Dozvoli mikrofon, kontakte i pozivanje, pa pritisni ponovo.", Toast.LENGTH_LONG).show()
+            Toast.makeText(
+                this,
+                "Dozvoli mikrofon, kontakte i pozivanje, pa pritisni ponovo.",
+                Toast.LENGTH_LONG
+            ).show()
             return false
         }
         return true
@@ -133,13 +144,18 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
 
     private fun refresh() {
         val running = prefs.getBoolean(AppPrefs.KEY_SERVICE_RUNNING, false)
-        status.text = (if (running) "● " else "○ ") + prefs.getString(AppPrefs.KEY_STATUS, "Isključeno")
+        status.text = (if (running) "● " else "○ ") +
+            prefs.getString(AppPrefs.KEY_STATUS, "Isključeno")
         wake.text = prefs.getString(AppPrefs.KEY_LAST_WAKE, "Wake profil još nije napravljen")
         heard.text = prefs.getString(AppPrefs.KEY_LAST_HEARD, "Još ništa")
+        debug.text = prefs.getString(AppPrefs.KEY_NAME_DEBUG, "Još nema testa imena")
         match.text = prefs.getString(AppPrefs.KEY_LAST_MATCH, "Još nema izbora")
     }
 
-    override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences?, key: String?) = refresh()
+    override fun onSharedPreferenceChanged(
+        sharedPreferences: SharedPreferences?,
+        key: String?
+    ) = refresh()
 
     override fun onDestroy() {
         prefs.unregisterOnSharedPreferenceChangeListener(this)
