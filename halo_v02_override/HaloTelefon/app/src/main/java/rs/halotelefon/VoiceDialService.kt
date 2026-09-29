@@ -12,6 +12,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
 import com.whispercpp.whisper.WhisperContext
+import java.util.LinkedHashSet
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -23,6 +24,7 @@ class VoiceDialService : Service() {
         private const val CHANNEL_ID = "halo_voice"
         private const val NOTIFICATION_ID = 1001
         private const val CANDIDATE_NOTIFICATION_ID = 1002
+        private const val SAMPLE_RATE = 16_000
     }
 
     private enum class Mode { WAIT_WAKE, WAIT_NAME, TRAIN_WAKE }
@@ -40,6 +42,7 @@ class VoiceDialService : Service() {
     private lateinit var whisper: WhisperContext
     private lateinit var acousticWakeStore: AcousticWakeStore
     private lateinit var learningStore: LearningStore
+    private var contactCache: List<PhoneContact>? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var tone: ToneGenerator? = null
     private var noiseSuppressor: NoiseSuppressor? = null
@@ -51,7 +54,7 @@ class VoiceDialService : Service() {
         createNotificationChannel()
         acousticWakeStore = AcousticWakeStore(this)
         learningStore = LearningStore(this)
-        tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 80)
+        tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 76)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -72,7 +75,8 @@ class VoiceDialService : Service() {
             AppPrefs.setLastWake(this, "Novi lokalni audio profil: 0/5")
             AppPrefs.setStatus(
                 this,
-                if (wasRunning) "Trening: reci ‘Halo telefon’ 1/5" else "Pokrećem model za trening…"
+                if (wasRunning) "Trening: reci ‘Halo telefon’ 1/5"
+                else "Pokrećem model za trening…"
             )
             if (wasRunning) beepReady()
         }
@@ -80,26 +84,31 @@ class VoiceDialService : Service() {
     }
 
     private fun startVoiceEngine() {
-        startForeground(NOTIFICATION_ID, serviceNotification("Pokrećem lokalni model…"))
+        startForeground(NOTIFICATION_ID, serviceNotification("Pokrećem lokalno slušanje…"))
         running = true
         AppPrefs.setRunning(this, true)
-        AppPrefs.setStatus(this, "Učitavam Base Whisper…")
+        AppPrefs.setStatus(this, "Učitavam lokalni model…")
 
-        val pm = getSystemService(PowerManager::class.java)
-        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "HaloTelefon:Voice").apply {
-            setReferenceCounted(false)
-            acquire(8 * 60 * 60 * 1000L)
+        // V0.4 default: NO wakelock. This is the main battery fix.
+        // The user can explicitly enable it when a specific phone suspends listening.
+        if (AppPrefs.keepAwake(this)) {
+            val pm = getSystemService(PowerManager::class.java)
+            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "HaloTelefon:ReliableListening").apply {
+                setReferenceCounted(false)
+                acquire(8 * 60 * 60 * 1000L)
+            }
         }
 
         inferenceExecutor.execute {
             try {
                 val model = ModelManager.ensureModel(this)
                 whisper = WhisperContext(model.absolutePath)
+                contactCache = loadContactsSafely()
                 initRecorder()
 
                 if (mode == Mode.TRAIN_WAKE) {
                     AppPrefs.setStatus(this, "Trening: reci ‘Halo telefon’ 1/5")
-                    updateServiceNotification("Trening lokalnog wake profila")
+                    updateServiceNotification("Trening wake profila")
                 } else {
                     AppPrefs.setStatus(
                         this,
@@ -108,7 +117,7 @@ class VoiceDialService : Service() {
                     )
                     updateServiceNotification(
                         if (acousticWakeStore.isReady()) "Slušam: ‘Halo telefon’"
-                        else "Čeka lokalni wake trening"
+                        else "Čeka trening wake fraze"
                     )
                 }
 
@@ -127,19 +136,18 @@ class VoiceDialService : Service() {
             error("Nema dozvole za mikrofon")
         }
 
-        val sampleRate = 16_000
         val minBuffer = AudioRecord.getMinBufferSize(
-            sampleRate,
+            SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT
         )
 
         recorder = AudioRecord(
             MediaRecorder.AudioSource.VOICE_RECOGNITION,
-            sampleRate,
+            SAMPLE_RATE,
             AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT,
-            maxOf(minBuffer, sampleRate * 2)
+            maxOf(minBuffer, SAMPLE_RATE * 2)
         )
         require(recorder.state == AudioRecord.STATE_INITIALIZED) { "AudioRecord nije inicijalizovan" }
 
@@ -200,18 +208,22 @@ class VoiceDialService : Service() {
                             mode = Mode.WAIT_WAKE
                             observedMode = mode
                             AppPrefs.setStatus(this, "Nisam čuo ime. Reci ponovo ‘Halo telefon’.")
-                            AppPrefs.setNameDebug(this, "Timeout: nije detektovan govor u 6 s")
+                            AppPrefs.setNameDebug(this, "Timeout: govor nije detektovan u 5 s")
                             updateServiceNotification("Slušam: ‘Halo telefon’")
                             beepError()
                             continue
                         }
 
-                        if (segment != null && segment.size >= 4_800) {
+                        if (segment != null && segment.size >= 8_000) {
                             nameInferencePending = true
-                            val seconds = segment.size / 16_000.0
+                            val seconds = segment.size / SAMPLE_RATE.toDouble()
                             AppPrefs.setStatus(this, "Prepoznajem ime…")
-                            AppPrefs.setNameDebug(this, "Snimljeno ${"%.2f".format(seconds)} s, pokrećem Whisper…")
+                            AppPrefs.setNameDebug(
+                                this,
+                                "Snimljeno ${"%.2f".format(seconds)} s • dodajem zaštitni padding"
+                            )
                             updateServiceNotification("Prepoznajem ime…")
+
                             if (!segmentQueue.offer(segment)) {
                                 nameInferencePending = false
                                 mode = Mode.WAIT_WAKE
@@ -241,10 +253,20 @@ class VoiceDialService : Service() {
                 Mode.WAIT_WAKE -> handleWake(audio)
                 Mode.TRAIN_WAKE -> handleWakeTraining(audio)
                 Mode.WAIT_NAME -> {
-                    val audioSeconds = audio.size / 16_000.0
+                    val rawSeconds = audio.size / SAMPLE_RATE.toDouble()
+                    val padded = padForWhisper(audio)
+                    val paddedSeconds = padded.size / SAMPLE_RATE.toDouble()
+                    val contacts = getContacts()
+                    val prompt = buildContactPrompt(contacts)
+
                     val started = SystemClock.elapsedRealtime()
                     val text = try {
-                        whisper.transcribe(audio, "sr").trim()
+                        whisper.transcribe(
+                            samples = padded,
+                            language = "sr",
+                            initialPrompt = prompt,
+                            threads = 2
+                        ).trim()
                     } catch (t: Throwable) {
                         AppPrefs.setNameDebug(this, "Whisper greška: ${t.message}")
                         ""
@@ -254,7 +276,8 @@ class VoiceDialService : Service() {
 
                     AppPrefs.setNameDebug(
                         this,
-                        "Audio ${"%.2f".format(audioSeconds)} s • Whisper ${elapsed} ms • raw: ${if (text.isBlank()) "(prazno)" else text}"
+                        "Audio ${"%.2f".format(rawSeconds)} s → ${"%.2f".format(paddedSeconds)} s • " +
+                            "Whisper ${elapsed} ms • raw: ${if (text.isBlank()) "(prazno)" else text}"
                     )
 
                     if (text.isBlank()) {
@@ -266,7 +289,7 @@ class VoiceDialService : Service() {
                     }
 
                     AppPrefs.setLastHeard(this, text)
-                    handleName(text)
+                    handleName(text, contacts)
                 }
             }
         }
@@ -274,7 +297,7 @@ class VoiceDialService : Service() {
 
     private fun handleWake(audio: FloatArray) {
         if (!acousticWakeStore.isReady()) {
-            AppPrefs.setStatus(this, "Wake profil nije naučen. Pritisni ‘Nauči moj izgovor’.")
+            AppPrefs.setStatus(this, "Wake profil nije naučen. Pritisni ‘Nauči izgovor’.")
             AppPrefs.setLastWake(this, "Wake profil: ${acousticWakeStore.count()}/5")
             return
         }
@@ -284,7 +307,6 @@ class VoiceDialService : Service() {
             this,
             "Wake ${result.confidence}% • d=${"%.2f".format(result.distance)} / ${"%.2f".format(result.threshold)}"
         )
-
         if (!result.matched) return
 
         mode = Mode.WAIT_NAME
@@ -323,30 +345,24 @@ class VoiceDialService : Service() {
         }
     }
 
-    private fun handleName(text: String) {
+    private fun handleName(text: String, contacts: List<PhoneContact>) {
         mode = Mode.WAIT_WAKE
         nameInferencePending = false
         updateServiceNotification("Slušam: ‘Halo telefon’")
         AppPrefs.setStatus(this, "Tražim kontakt…")
 
-        if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
-            fail("Nema dozvole za kontakte")
-            return
-        }
-
-        val contacts = ContactRepository(contentResolver).load()
         val ranked = ContactMatcher(learningStore).rank(text, contacts, 3)
         val best = ranked.getOrNull(0)
         val second = ranked.getOrNull(1)
 
-        if (best == null || best.score < 0.64) {
+        if (best == null || best.score < 0.58) {
             fail("Nisam našao dovoljno sličan kontakt za: $text")
             return
         }
 
         val margin = best.score - (second?.score ?: 0.0)
-        val learnedStrong = best.learnedUses >= 1 && best.score >= 0.88
-        val strong = best.score >= 0.90 && margin >= 0.08
+        val learnedStrong = best.learnedUses >= 1 && best.score >= 0.84
+        val strong = best.score >= 0.87 && margin >= 0.06
 
         if (learnedStrong || strong) {
             if (checkSelfPermission(Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) {
@@ -375,6 +391,46 @@ class VoiceDialService : Service() {
         beepError()
     }
 
+    private fun loadContactsSafely(): List<PhoneContact> {
+        if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+            return emptyList()
+        }
+        return ContactRepository(contentResolver).load()
+    }
+
+    private fun getContacts(): List<PhoneContact> {
+        val cached = contactCache
+        if (!cached.isNullOrEmpty()) return cached
+        return loadContactsSafely().also { contactCache = it }
+    }
+
+    private fun buildContactPrompt(contacts: List<PhoneContact>): String {
+        val unique = LinkedHashSet<String>()
+        for (contact in contacts) {
+            val name = contact.displayName.trim()
+            if (name.length >= 2) unique += name
+            if (unique.size >= 120) break
+        }
+
+        val prefix = "Ime i prezime osobe iz srpskog telefonskog imenika. Mogući kontakti: "
+        val out = StringBuilder(prefix)
+        for (name in unique) {
+            val extra = if (out.length == prefix.length) name else ", $name"
+            if (out.length + extra.length > 1450) break
+            out.append(extra)
+        }
+        out.append(".")
+        return out.toString()
+    }
+
+    private fun padForWhisper(audio: FloatArray): FloatArray {
+        val prefix = IntArray((SAMPLE_RATE * 0.35).toInt()).size
+        val suffix = IntArray((SAMPLE_RATE * 0.55).toInt()).size
+        val out = FloatArray(prefix + audio.size + suffix)
+        audio.copyInto(out, destinationOffset = prefix)
+        return out
+    }
+
     private fun postCandidateNotification(spoken: String, candidates: List<ContactCandidate>) {
         val builder = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.sym_action_call)
@@ -395,7 +451,9 @@ class VoiceDialService : Service() {
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
-            builder.addAction(Notification.Action.Builder(0, candidate.contact.displayName, pi).build())
+            builder.addAction(
+                Notification.Action.Builder(0, candidate.contact.displayName, pi).build()
+            )
         }
 
         getSystemService(NotificationManager::class.java)
@@ -408,18 +466,18 @@ class VoiceDialService : Service() {
     }
 
     private fun beepReady() {
-        ignoreAudioUntilMs = SystemClock.elapsedRealtime() + 220
-        tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 120)
+        ignoreAudioUntilMs = SystemClock.elapsedRealtime() + 180
+        tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 110)
     }
 
     private fun beepSuccess() {
-        ignoreAudioUntilMs = SystemClock.elapsedRealtime() + 260
-        tone?.startTone(ToneGenerator.TONE_PROP_ACK, 180)
+        ignoreAudioUntilMs = SystemClock.elapsedRealtime() + 240
+        tone?.startTone(ToneGenerator.TONE_PROP_ACK, 170)
     }
 
     private fun beepError() {
-        ignoreAudioUntilMs = SystemClock.elapsedRealtime() + 300
-        tone?.startTone(ToneGenerator.TONE_PROP_NACK, 220)
+        ignoreAudioUntilMs = SystemClock.elapsedRealtime() + 280
+        tone?.startTone(ToneGenerator.TONE_PROP_NACK, 200)
     }
 
     private fun createNotificationChannel() {
@@ -429,9 +487,10 @@ class VoiceDialService : Service() {
                 "Glasovno pozivanje",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Mikrofon sluša lokalnu wake frazu. Audio se ne šalje na internet."
+                description = "Lokalno slušanje wake fraze. Audio se ne šalje na internet."
             }
-            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+            getSystemService(NotificationManager::class.java)
+                .createNotificationChannel(channel)
         }
     }
 
@@ -451,7 +510,7 @@ class VoiceDialService : Service() {
 
         return Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
-            .setContentTitle("Halo Telefon je aktivan")
+            .setContentTitle("Halo Telefon")
             .setContentText(text)
             .setContentIntent(open)
             .setOngoing(true)

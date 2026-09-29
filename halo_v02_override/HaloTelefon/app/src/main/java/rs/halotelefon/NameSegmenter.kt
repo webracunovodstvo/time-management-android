@@ -4,8 +4,11 @@ import kotlin.math.max
 import kotlin.math.sqrt
 
 /**
- * Dedicated capture logic for the contact name after the wake phrase.
- * Much more permissive than the always-on wake VAD.
+ * Dedicated capture for a short contact name.
+ *
+ * V0.4 deliberately never closes a name segment before ~0.9 s. The previous
+ * version could stop at 0.36 s, which is too short for Whisper to identify a
+ * Serbian name reliably.
  */
 class NameSegmenter(
     private val sampleRate: Int = 16_000
@@ -21,7 +24,7 @@ class NameSegmenter(
     private var waitingFrames = 0
     private var peakRms = 0.0
     private val preRoll = ArrayDeque<FloatArray>()
-    private val segment = ArrayList<Float>(sampleRate * 3)
+    private val segment = ArrayList<Float>(sampleRate * 4)
 
     fun reset() {
         speechStarted = false
@@ -39,21 +42,19 @@ class NameSegmenter(
 
         if (!speechStarted) {
             waitingFrames++
-            if (waitingFrames > 300) { // ~6 s at 20 ms per frame
+            if (waitingFrames > 250) { // about 5 s
                 timedOut = true
                 return null
             }
 
-            noiseFloor = if (rms < max(0.015, noiseFloor * 2.5)) {
-                (noiseFloor * 0.97 + rms * 0.03).coerceIn(0.0012, 0.05)
-            } else {
-                noiseFloor
+            if (rms < max(0.015, noiseFloor * 2.4)) {
+                noiseFloor = (noiseFloor * 0.97 + rms * 0.03).coerceIn(0.0012, 0.05)
             }
 
             preRoll.addLast(frame.copyOf())
-            while (preRoll.size > 8) preRoll.removeFirst()
+            while (preRoll.size > 12) preRoll.removeFirst() // ~240 ms
 
-            val startThreshold = max(0.0032, noiseFloor * 1.40)
+            val startThreshold = max(0.0030, noiseFloor * 1.35)
             if (rms > startThreshold) speechFrames++ else speechFrames = 0
 
             if (speechFrames >= 2) {
@@ -69,12 +70,13 @@ class NameSegmenter(
         frame.forEach(segment::add)
         peakRms = max(peakRms, rms)
 
-        val endThreshold = max(0.0028, max(noiseFloor * 1.25, peakRms * 0.09))
+        val endThreshold = max(0.0028, max(noiseFloor * 1.18, peakRms * 0.075))
         if (rms < endThreshold) silenceFrames++ else silenceFrames = 0
 
         val durationSeconds = segment.size.toDouble() / sampleRate
-        val endedBySilence = silenceFrames >= 12 && durationSeconds >= 0.35
-        val endedByLength = durationSeconds >= 3.0
+        val longEnough = durationSeconds >= 0.90
+        val endedBySilence = longEnough && silenceFrames >= 18 // ~360 ms
+        val endedByLength = durationSeconds >= 3.6
 
         if (endedBySilence || endedByLength) {
             val out = segment.toFloatArray()

@@ -12,6 +12,7 @@ object AppPrefs {
     const val KEY_SERVICE_RUNNING = "service_running"
     const val KEY_PENDING_SPOKEN = "pending_spoken"
     const val KEY_WAKE_ALIASES = "wake_aliases"
+    const val KEY_KEEP_AWAKE = "keep_awake"
 
     fun prefs(context: Context) = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
@@ -38,4 +39,7 @@ object AppPrefs {
     fun setRunning(context: Context, running: Boolean) {
         prefs(context).edit().putBoolean(KEY_SERVICE_RUNNING, running).apply()
     }
+
+    fun keepAwake(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_KEEP_AWAKE, false)
 }

@@ -27,6 +27,7 @@ Java_com_whispercpp_whisper_WhisperNative_transcribe(
         jlong contextPtr,
         jfloatArray samples,
         jstring language,
+        jstring initialPrompt,
         jint threads) {
     auto *ctx = reinterpret_cast<whisper_context *>(contextPtr);
     if (!ctx) return env->NewStringUTF("");
@@ -34,8 +35,9 @@ Java_com_whispercpp_whisper_WhisperNative_transcribe(
     jfloat *pcm = env->GetFloatArrayElements(samples, nullptr);
     const jsize n = env->GetArrayLength(samples);
     const char *lang = env->GetStringUTFChars(language, nullptr);
+    const char *prompt = env->GetStringUTFChars(initialPrompt, nullptr);
 
-    whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+    whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_BEAM_SEARCH);
     params.print_realtime = false;
     params.print_progress = false;
     params.print_timestamps = false;
@@ -47,7 +49,12 @@ Java_com_whispercpp_whisper_WhisperNative_transcribe(
     params.single_segment = true;
     params.suppress_blank = true;
     params.no_timestamps = true;
-    params.max_tokens = 16;
+    params.max_tokens = 14;
+    params.temperature = 0.0f;
+    params.beam_search.beam_size = 3;
+    params.beam_search.patience = 1.0f;
+    params.initial_prompt = (prompt && prompt[0] != '\0') ? prompt : nullptr;
+    params.carry_initial_prompt = true;
 
     std::string result;
     if (whisper_full(ctx, params, pcm, n) == 0) {
@@ -58,6 +65,7 @@ Java_com_whispercpp_whisper_WhisperNative_transcribe(
         }
     }
 
+    env->ReleaseStringUTFChars(initialPrompt, prompt);
     env->ReleaseStringUTFChars(language, lang);
     env->ReleaseFloatArrayElements(samples, pcm, JNI_ABORT);
     return env->NewStringUTF(result.c_str());
