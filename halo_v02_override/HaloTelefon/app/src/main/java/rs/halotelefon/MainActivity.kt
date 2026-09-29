@@ -51,6 +51,12 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         window.statusBarColor = bg
         window.navigationBarColor = bg
         prefs = AppPrefs.prefs(this)
+        if (prefs.getInt("ui_migration", 0) < 5) {
+            prefs.edit()
+                .putBoolean(AppPrefs.KEY_KEEP_AWAKE, false)
+                .putInt("ui_migration", 5)
+                .apply()
+        }
         prefs.registerOnSharedPreferenceChangeListener(this)
         setContentView(buildUi())
         refresh()
@@ -247,7 +253,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         }
 
         root.addView(TextView(this).apply {
-            text = "v0.4  •  Imena se obrađuju samo na telefonu. Nema INTERNET dozvole ni cloud backup-a."
+            text = "v0.5  •  Brži lokalni model • Nema INTERNET dozvole ni cloud backup-a."
             textSize = 12f
             setTextColor(muted)
             gravity = Gravity.CENTER

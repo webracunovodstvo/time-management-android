@@ -37,7 +37,7 @@ Java_com_whispercpp_whisper_WhisperNative_transcribe(
     const char *lang = env->GetStringUTFChars(language, nullptr);
     const char *prompt = env->GetStringUTFChars(initialPrompt, nullptr);
 
-    whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_BEAM_SEARCH);
+    whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
     params.print_realtime = false;
     params.print_progress = false;
     params.print_timestamps = false;
@@ -49,12 +49,11 @@ Java_com_whispercpp_whisper_WhisperNative_transcribe(
     params.single_segment = true;
     params.suppress_blank = true;
     params.no_timestamps = true;
-    params.max_tokens = 14;
+    params.max_tokens = 10;
     params.temperature = 0.0f;
-    params.beam_search.beam_size = 3;
-    params.beam_search.patience = 1.0f;
+    params.greedy.best_of = 1;
     params.initial_prompt = (prompt && prompt[0] != '\0') ? prompt : nullptr;
-    params.carry_initial_prompt = true;
+    params.carry_initial_prompt = false;
 
     std::string result;
     if (whisper_full(ctx, params, pcm, n) == 0) {

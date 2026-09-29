@@ -9,10 +9,8 @@ import android.media.audiofx.AutomaticGainControl
 import android.media.audiofx.NoiseSuppressor
 import android.os.Build
 import android.os.IBinder
-import android.os.PowerManager
 import android.os.SystemClock
 import com.whispercpp.whisper.WhisperContext
-import java.util.LinkedHashSet
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -43,7 +41,6 @@ class VoiceDialService : Service() {
     private lateinit var acousticWakeStore: AcousticWakeStore
     private lateinit var learningStore: LearningStore
     private var contactCache: List<ContactPhone>? = null
-    private var wakeLock: PowerManager.WakeLock? = null
     private var tone: ToneGenerator? = null
     private var noiseSuppressor: NoiseSuppressor? = null
     private var automaticGainControl: AutomaticGainControl? = null
@@ -89,15 +86,8 @@ class VoiceDialService : Service() {
         AppPrefs.setRunning(this, true)
         AppPrefs.setStatus(this, "Učitavam lokalni model…")
 
-        // V0.4 default: NO wakelock. This is the main battery fix.
-        // The user can explicitly enable it when a specific phone suspends listening.
-        if (AppPrefs.keepAwake(this)) {
-            val pm = getSystemService(PowerManager::class.java)
-            wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "HaloTelefon:ReliableListening").apply {
-                setReferenceCounted(false)
-                acquire(8 * 60 * 60 * 1000L)
-            }
-        }
+        // V0.5: no partial wake lock. Foreground microphone remains active,
+        // but CPU is not pinned awake unnecessarily.
 
         inferenceExecutor.execute {
             try {
@@ -257,7 +247,7 @@ class VoiceDialService : Service() {
                     val padded = padForWhisper(audio)
                     val paddedSeconds = padded.size / SAMPLE_RATE.toDouble()
                     val contacts = getContacts()
-                    val prompt = buildContactPrompt(contacts)
+                    val prompt = buildContactPrompt()
 
                     val started = SystemClock.elapsedRealtime()
                     val text = try {
@@ -265,7 +255,7 @@ class VoiceDialService : Service() {
                             samples = padded,
                             language = "sr",
                             initialPrompt = prompt,
-                            threads = 2
+                            threads = 4
                         ).trim()
                     } catch (t: Throwable) {
                         AppPrefs.setNameDebug(this, "Whisper greška: ${t.message}")
@@ -404,24 +394,8 @@ class VoiceDialService : Service() {
         return loadContactsSafely().also { contactCache = it }
     }
 
-    private fun buildContactPrompt(contacts: List<ContactPhone>): String {
-        val unique = LinkedHashSet<String>()
-        for (contact in contacts) {
-            val name = contact.displayName.trim()
-            if (name.length >= 2) unique += name
-            if (unique.size >= 120) break
-        }
-
-        val prefix = "Ime i prezime osobe iz srpskog telefonskog imenika. Mogući kontakti: "
-        val out = StringBuilder(prefix)
-        for (name in unique) {
-            val extra = if (out.length == prefix.length) name else ", $name"
-            if (out.length + extra.length > 1450) break
-            out.append(extra)
-        }
-        out.append(".")
-        return out.toString()
-    }
+    private fun buildContactPrompt(): String =
+        "Ime i prezime osobe iz telefonskog imenika u Srbiji."
 
     private fun padForWhisper(audio: FloatArray): FloatArray {
         val prefix = IntArray((SAMPLE_RATE * 0.35).toInt()).size
@@ -535,7 +509,6 @@ class VoiceDialService : Service() {
         try { if (::whisper.isInitialized) whisper.close() } catch (_: Throwable) {}
         try { learningStore.close() } catch (_: Throwable) {}
         tone?.release()
-        wakeLock?.takeIf { it.isHeld }?.release()
         audioExecutor.shutdownNow()
         inferenceExecutor.shutdownNow()
 
