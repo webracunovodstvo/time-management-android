@@ -276,7 +276,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         }
 
         root.addView(TextView(this).apply {
-            text = "v0.6  •  Direktan test imena • Nema INTERNET dozvole ni cloud backup-a."
+            text = "v0.7  •  Glasovno razrešavanje sličnih kontakata • 100% lokalno."
             textSize = 12f
             setTextColor(muted)
             gravity = Gravity.CENTER
