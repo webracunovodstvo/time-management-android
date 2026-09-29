@@ -70,13 +70,18 @@ class AcousticWakeStore(context: Context) {
         if (query.size < 20 || query.size > 340) return Match(false, 99.0, threshold(), 0)
 
         val distances = templates.map { WakeFeatures.dtw(query, it) }.sorted()
-        val bestCount = min(2, distances.size)
-        val distance = distances.take(bestCount).average()
+        val distance = distances.firstOrNull() ?: return Match(false, 99.0, threshold(), 0)
         val threshold = threshold()
-        val matched = distance <= threshold
 
-        val confidence = ((1.0 - distance / (threshold * 1.35)) * 100.0)
-            .toInt().coerceIn(0, 100)
+        val templateLengths = templates.map { it.size }.sorted()
+        val medianLength = templateLengths[templateLengths.size / 2].coerceAtLeast(1)
+        val durationRatio = query.size.toDouble() / medianLength.toDouble()
+        val plausibleDuration = durationRatio in 0.55..1.85
+        val matched = plausibleDuration && distance <= threshold
+
+        val confidence = if (!plausibleDuration) 0 else
+            ((1.0 - distance / (threshold * 1.20)) * 100.0)
+                .toInt().coerceIn(0, 100)
         return Match(matched, distance, threshold, confidence)
     }
 
@@ -91,8 +96,8 @@ class AcousticWakeStore(context: Context) {
         if (pairwise.isEmpty()) return 0.62
         val center = median(pairwise)
         val mad = median(pairwise.map { abs(it - center) })
-        return max(center * 1.35, center + max(0.10, mad * 3.5))
-            .coerceIn(0.34, 0.86)
+        val learned = max(center * 1.55, center + max(0.16, mad * 4.0))
+        return max(0.90, learned).coerceAtMost(1.05)
     }
 
     private fun reload() {
