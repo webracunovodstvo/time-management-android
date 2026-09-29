@@ -244,6 +244,29 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         heardValue = detailRow(detailPanel, "Prepoznato ime")
         debugValue = detailRow(detailPanel, "Dijagnostika")
         matchValue = detailRow(detailPanel, "Kontakt")
+
+        detailPanel.addView(Button(this).apply {
+            text = "Testiraj ime bez „Halo telefon“"
+            isAllCaps = false
+            textSize = 15f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            background = rounded(accent, 16f)
+            setOnClickListener {
+                if (ensurePermissions()) {
+                    val intent = Intent(this@MainActivity, VoiceDialService::class.java)
+                        .setAction(VoiceDialService.ACTION_TEST_NAME)
+                    if (prefs.getBoolean(AppPrefs.KEY_SERVICE_RUNNING, false)) {
+                        startService(intent)
+                    } else {
+                        startForegroundService(intent)
+                    }
+                }
+            }
+        }, LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, dp(50)
+        ).apply { topMargin = dp(16) })
+
         root.addView(detailPanel)
 
         detailsHeader.setOnClickListener {
@@ -253,7 +276,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         }
 
         root.addView(TextView(this).apply {
-            text = "v0.5  •  Brži lokalni model • Nema INTERNET dozvole ni cloud backup-a."
+            text = "v0.6  •  Direktan test imena • Nema INTERNET dozvole ni cloud backup-a."
             textSize = 12f
             setTextColor(muted)
             gravity = Gravity.CENTER
