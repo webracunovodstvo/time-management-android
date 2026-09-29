@@ -2,13 +2,17 @@ package rs.halotelefon
 
 import android.Manifest
 import android.app.*
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.media.*
 import android.media.audiofx.AutomaticGainControl
 import android.media.audiofx.NoiseSuppressor
 import android.os.Build
 import android.os.IBinder
+import android.os.PowerManager
 import android.os.SystemClock
 import com.whispercpp.whisper.WhisperContext
 import java.util.concurrent.ArrayBlockingQueue
@@ -23,6 +27,7 @@ class VoiceDialService : Service() {
         private const val CHANNEL_ID = "halo_voice"
         private const val NOTIFICATION_ID = 1001
         private const val CANDIDATE_NOTIFICATION_ID = 1002
+        private const val CANDIDATE_CHANNEL_ID = "halo_candidates_v1"
         private const val SAMPLE_RATE = 16_000
     }
 
@@ -47,7 +52,17 @@ class VoiceDialService : Service() {
     private var tone: ToneGenerator? = null
     private var noiseSuppressor: NoiseSuppressor? = null
     private var automaticGainControl: AutomaticGainControl? = null
+    private var screenWakeLock: PowerManager.WakeLock? = null
     @Volatile private var ignoreAudioUntilMs: Long = 0L
+
+    private val screenReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                Intent.ACTION_SCREEN_OFF -> syncScreenWakeLock()
+                Intent.ACTION_SCREEN_ON -> releaseScreenWakeLock()
+            }
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -55,6 +70,16 @@ class VoiceDialService : Service() {
         acousticWakeStore = AcousticWakeStore(this)
         learningStore = LearningStore(this)
         tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 76)
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+        }
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(screenReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(screenReceiver, filter)
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -106,9 +131,7 @@ class VoiceDialService : Service() {
         running = true
         AppPrefs.setRunning(this, true)
         AppPrefs.setStatus(this, "Učitavam lokalni model…")
-
-        // V0.5: no partial wake lock. Foreground microphone remains active,
-        // but CPU is not pinned awake unnecessarily.
+        syncScreenWakeLock()
 
         inferenceExecutor.execute {
             try {
@@ -280,7 +303,7 @@ class VoiceDialService : Service() {
                     val rawSeconds = audio.size / SAMPLE_RATE.toDouble()
                     val padded = padForWhisper(audio)
                     val paddedSeconds = padded.size / SAMPLE_RATE.toDouble()
-                    val contacts = if (pendingCandidates.isNotEmpty()) pendingCandidates else getContacts()
+                    val contacts = getContacts()
                     val prompt = buildContactPrompt()
 
                     val started = SystemClock.elapsedRealtime()
@@ -313,13 +336,7 @@ class VoiceDialService : Service() {
                     }
 
                     AppPrefs.setLastHeard(this, text)
-                    val previous = pendingSpoken
-                    val forms = if (previous.isNullOrBlank()) {
-                        listOf(text)
-                    } else {
-                        listOf(text, "$previous $text")
-                    }
-                    handleNameForms(forms, contacts)
+                    handleNameForms(listOf(text), contacts)
                 }
             }
         }
@@ -380,7 +397,7 @@ class VoiceDialService : Service() {
         nameInferencePending = false
         AppPrefs.setStatus(this, "Tražim kontakt…")
 
-        val ranked = ContactMatcher(learningStore).rankBestOf(forms, contacts, 5)
+        val ranked = ContactMatcher(learningStore).rankBestOf(forms, contacts, 20)
         val best = ranked.getOrNull(0)
         val second = ranked.getOrNull(1)
 
@@ -388,7 +405,7 @@ class VoiceDialService : Service() {
             clearPendingChoice()
             mode = Mode.WAIT_WAKE
             updateServiceNotification("Slušam: ‘Halo telefon’")
-            fail("Nisam našao dovoljno sličan kontakt za: ${forms.lastOrNull().orEmpty()}")
+            fail("Nisam našao dovoljno sličan kontakt za: " + forms.lastOrNull().orEmpty())
             return
         }
 
@@ -414,52 +431,37 @@ class VoiceDialService : Service() {
             updateServiceNotification("Slušam: ‘Halo telefon’")
             AppPrefs.setLastMatch(
                 this,
-                "${best.contact.displayName} (${"%.0f".format(best.score * 100)}%)"
+                best.contact.displayName + " (" + "%.0f".format(best.score * 100) + "%)"
             )
-            AppPrefs.setStatus(this, "Pozivam ${best.contact.displayName}")
+            AppPrefs.setStatus(this, "Pozivam " + best.contact.displayName)
             beepSuccess()
             CallPlacer.call(this, best.contact.number)
             return
         }
 
-        if (pendingCandidates.isEmpty()) {
-            pendingSpoken = forms.firstOrNull().orEmpty()
-            pendingCandidates = ranked.map { it.contact }
-
-            AppPrefs.setLastMatch(
-                this,
-                ranked.take(3).joinToString(" • ") {
-                    "${it.contact.displayName} ${"%.0f".format(it.score * 100)}%"
+        val floor = maxOf(0.58, best.score - 0.12)
+        val plausible = ranked
+            .filter { it.score >= floor }
+            .distinctBy {
+                SerbianNormalizer.normalize(it.contact.displayName) + "|" +
+                    it.contact.number.filter(Char::isDigit).takeLast(12)
+            }
+            .sortedWith(
+                compareByDescending<ContactCandidate> {
+                    learningStore.totalUses(it.contact.lookupKey)
+                }.thenByDescending {
+                    learningStore.lastUsed(it.contact.lookupKey)
+                }.thenByDescending {
+                    it.score
                 }
             )
-            AppPrefs.setStatus(this, "Više kontakata. Posle tona reci prezime ili puno ime.")
-            AppPrefs.setNameDebug(
-                this,
-                "Prvi rezultat nije jedinstven • čekam dopunu imena"
-            )
-
-            mode = Mode.WAIT_NAME
-            segmentQueue.clear()
-            updateServiceNotification("Reci prezime ili puno ime")
-            beepClarify()
-            return
-        }
-
-        val spokenForLearning = forms.joinToString(" ")
-        AppPrefs.prefs(this).edit().putString(AppPrefs.KEY_PENDING_SPOKEN, spokenForLearning).apply()
-        AppPrefs.setLastMatch(
-            this,
-            ranked.take(3).joinToString(" • ") {
-                "${it.contact.displayName} ${"%.0f".format(it.score * 100)}%"
-            }
-        )
+            .take(5)
 
         clearPendingChoice()
         mode = Mode.WAIT_WAKE
         updateServiceNotification("Slušam: ‘Halo telefon’")
-        AppPrefs.setStatus(this, "I dalje nisam potpuno siguran. Izaberi kontakt iz obaveštenja.")
-        postCandidateNotification(spokenForLearning, ranked.take(2))
-        beepError()
+        AppPrefs.setStatus(this, "Izaberi kontakt sa ekrana.")
+        showCandidatePicker(forms.lastOrNull().orEmpty(), plausible.ifEmpty { listOf(best) })
     }
 
     private fun clearPendingChoice() {
@@ -491,33 +493,104 @@ class VoiceDialService : Service() {
         return out
     }
 
-    private fun postCandidateNotification(spoken: String, candidates: List<ContactCandidate>) {
-        val builder = Notification.Builder(this, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.sym_action_call)
-            .setContentTitle("Koji kontakt si rekao?")
-            .setContentText(candidates.joinToString(" ili ") { it.contact.displayName })
-            .setAutoCancel(true)
-
-        candidates.forEachIndexed { index, candidate ->
-            val intent = Intent(this, CandidateReceiver::class.java).apply {
-                putExtra("lookupKey", candidate.contact.lookupKey)
-                putExtra("number", candidate.contact.number)
-                putExtra("name", candidate.contact.displayName)
-                putExtra("spoken", spoken)
+    private fun showCandidatePicker(spoken: String, candidates: List<ContactCandidate>) {
+        val ordered = candidates
+            .distinctBy {
+                SerbianNormalizer.normalize(it.contact.displayName) + "|" +
+                    it.contact.number.filter(Char::isDigit).takeLast(12)
             }
-            val pi = PendingIntent.getBroadcast(
-                this,
-                700 + index,
-                intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            .sortedWith(
+                compareByDescending<ContactCandidate> {
+                    learningStore.totalUses(it.contact.lookupKey)
+                }.thenByDescending {
+                    learningStore.lastUsed(it.contact.lookupKey)
+                }.thenByDescending {
+                    it.score
+                }
             )
-            builder.addAction(
-                Notification.Action.Builder(0, candidate.contact.displayName, pi).build()
+            .take(5)
+
+        val names = ArrayList(ordered.map { it.contact.displayName })
+        val numbers = ArrayList(ordered.map { it.contact.number })
+        val keys = ArrayList(ordered.map { it.contact.lookupKey })
+        val uses = ArrayList(ordered.map { learningStore.totalUses(it.contact.lookupKey) })
+        val scores = ordered.map { it.score }.toDoubleArray()
+
+        AppPrefs.setLastMatch(
+            this,
+            ordered.joinToString(" • ") {
+                it.contact.displayName + " " + "%.0f".format(it.score * 100) + "% · " +
+                    learningStore.totalUses(it.contact.lookupKey) + "×"
+            }
+        )
+
+        val picker = Intent(this, CandidateActivity::class.java).apply {
+            putExtra(CandidateActivity.EXTRA_SPOKEN, spoken)
+            putStringArrayListExtra(CandidateActivity.EXTRA_NAMES, names)
+            putStringArrayListExtra(CandidateActivity.EXTRA_NUMBERS, numbers)
+            putStringArrayListExtra(CandidateActivity.EXTRA_KEYS, keys)
+            putIntegerArrayListExtra(CandidateActivity.EXTRA_USES, uses)
+            putExtra(CandidateActivity.EXTRA_SCORES, scores)
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
             )
         }
 
-        getSystemService(NotificationManager::class.java)
-            .notify(CANDIDATE_NOTIFICATION_ID, builder.build())
+        val pending = PendingIntent.getActivity(
+            this,
+            901,
+            picker,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val manager = getSystemService(NotificationManager::class.java)
+        val builder = Notification.Builder(this, CANDIDATE_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.sym_action_call)
+            .setContentTitle("Izaberi kontakt")
+            .setContentText(names.take(3).joinToString(" • "))
+            .setContentIntent(pending)
+            .setCategory(Notification.CATEGORY_CALL)
+            .setPriority(Notification.PRIORITY_MAX)
+            .setVisibility(Notification.VISIBILITY_PUBLIC)
+            .setAutoCancel(true)
+
+        val canFullScreen = Build.VERSION.SDK_INT < 34 || manager.canUseFullScreenIntent()
+        if (canFullScreen) {
+            builder.setFullScreenIntent(pending, true)
+        }
+
+        manager.notify(CANDIDATE_NOTIFICATION_ID, builder.build())
+
+        val pm = getSystemService(PowerManager::class.java)
+        if (pm.isInteractive) {
+            runCatching { startActivity(picker) }
+        }
+    }
+
+    private fun syncScreenWakeLock() {
+        val pm = getSystemService(PowerManager::class.java)
+        if (!running || !AppPrefs.keepAwake(this) || pm.isInteractive) {
+            releaseScreenWakeLock()
+            return
+        }
+
+        if (screenWakeLock?.isHeld == true) return
+        screenWakeLock = pm.newWakeLock(
+            PowerManager.PARTIAL_WAKE_LOCK,
+            "HaloTelefon:ScreenOffListening"
+        ).apply {
+            setReferenceCounted(false)
+            acquire()
+        }
+    }
+
+    private fun releaseScreenWakeLock() {
+        screenWakeLock?.let { lock ->
+            if (lock.isHeld) runCatching { lock.release() }
+        }
+        screenWakeLock = null
     }
 
     private fun fail(message: String) {
@@ -547,15 +620,26 @@ class VoiceDialService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= 26) {
-            val channel = NotificationChannel(
+            val manager = getSystemService(NotificationManager::class.java)
+
+            val listening = NotificationChannel(
                 CHANNEL_ID,
                 "Glasovno pozivanje",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = "Lokalno slušanje wake fraze. Audio se ne šalje na internet."
             }
-            getSystemService(NotificationManager::class.java)
-                .createNotificationChannel(channel)
+            manager.createNotificationChannel(listening)
+
+            val candidates = NotificationChannel(
+                CANDIDATE_CHANNEL_ID,
+                "Izbor kontakta",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Veliki izbor kontakta kada postoji više podudaranja."
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+            }
+            manager.createNotificationChannel(candidates)
         }
     }
 
@@ -600,6 +684,8 @@ class VoiceDialService : Service() {
         try { if (::whisper.isInitialized) whisper.close() } catch (_: Throwable) {}
         try { learningStore.close() } catch (_: Throwable) {}
         tone?.release()
+        releaseScreenWakeLock()
+        runCatching { unregisterReceiver(screenReceiver) }
         audioExecutor.shutdownNow()
         inferenceExecutor.shutdownNow()
 
