@@ -46,7 +46,7 @@ class ConfirmationSegmenter(
         if (!speechStarted) {
             waitingFrames++
 
-            if (waitingFrames > 225) { // ~4.5 seconds
+            if (waitingFrames > 500) { // ~10 seconds: enough time to read 5 candidates
                 timedOut = true
                 return null
             }
