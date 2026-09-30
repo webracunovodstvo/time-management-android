@@ -15,6 +15,8 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.os.SystemClock
 import com.whispercpp.whisper.WhisperContext
+import java.text.Normalizer
+import java.util.Locale
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -424,6 +426,7 @@ class VoiceDialService : Service() {
                         buildContactPrompt(),
                         "ime"
                     )
+                    nameInferencePending = false
 
                     if (text.isBlank()) {
                         AppPrefs.setLastHeard(
@@ -445,13 +448,31 @@ class VoiceDialService : Service() {
                 }
 
                 Mode.WAIT_CONFIRM -> {
-                    val text = transcribeShort(
+                    // First pass is deliberately command-only. Short words such as
+                    // "zovi" must not be sent straight into contact matching.
+                    val commandText = transcribeShort(
                         audio,
-                        "Kratka komanda: može, ok, zovi. Ili ime i prezime osobe.",
-                        "potvrda"
+                        "Komanda za potvrdu telefonskog poziva. Dozvoljene reči su: zovi, može, ok, okej, pozovi.",
+                        "komanda"
                     )
 
-                    if (text.isBlank()) {
+                    if (isConfirmation(commandText)) {
+                        nameInferencePending = false
+                        AppPrefs.setLastHeard(this, commandText)
+                        confirmSelectedCall()
+                        continue
+                    }
+
+                    // Only when the command pass clearly was NOT a confirmation do
+                    // we run the same audio as a possible replacement contact name.
+                    val nameText = transcribeShort(
+                        audio,
+                        buildContactPrompt(),
+                        "novo ime"
+                    )
+                    nameInferencePending = false
+
+                    if (nameText.isBlank()) {
                         AppPrefs.setStatus(
                             this,
                             "Nisam razumeo. Reci ‘može’, ‘ok’, ‘zovi’ ili drugo ime."
@@ -460,13 +481,8 @@ class VoiceDialService : Service() {
                         continue
                     }
 
-                    AppPrefs.setLastHeard(this, text)
-
-                    if (isConfirmation(text)) {
-                        confirmSelectedCall()
-                    } else {
-                        handleName(text)
-                    }
+                    AppPrefs.setLastHeard(this, nameText)
+                    handleName(nameText)
                 }
             }
         }
@@ -496,7 +512,6 @@ class VoiceDialService : Service() {
         }
 
         val elapsed = SystemClock.elapsedRealtime() - started
-        nameInferencePending = false
 
         AppPrefs.setNameDebug(
             this,
@@ -508,14 +523,75 @@ class VoiceDialService : Service() {
     }
 
     private fun isConfirmation(raw: String): Boolean {
-        val normalized = SerbianNormalizer.normalize(raw)
+        val normalized = normalizeCommand(raw)
+        if (normalized.isBlank()) return false
+
         val words = normalized
             .split(' ')
             .filter { it.isNotBlank() }
-            .toSet()
 
-        return normalized in setOf("moze", "ok", "zovi") ||
-            words.any { it in setOf("moze", "ok", "zovi") }
+        return words.any { word ->
+            when {
+                word == "ok" || word == "okej" || word == "okay" -> true
+                word == "zovi" || word == "pozovi" || word.endsWith("zovi") -> true
+                word == "moze" -> true
+                editDistanceAtMostOne(word, "zovi") -> true
+                editDistanceAtMostOne(word, "moze") -> true
+                else -> false
+            }
+        }
+    }
+
+    private fun normalizeCommand(raw: String): String {
+        var value = raw
+            .lowercase(Locale.ROOT)
+            .replace("може", "moze")
+            .replace("зови", "zovi")
+            .replace("позови", "pozovi")
+            .replace("океј", "okej")
+            .replace("ок", "ok")
+            .replace('đ', 'd')
+            .replace('Đ', 'd')
+
+        value = Normalizer.normalize(value, Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}+"), "")
+
+        return value
+            .replace(Regex("[^a-z ]+"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+
+    private fun editDistanceAtMostOne(a: String, b: String): Boolean {
+        if (a == b) return true
+        if (kotlin.math.abs(a.length - b.length) > 1) return false
+
+        var i = 0
+        var j = 0
+        var edits = 0
+
+        while (i < a.length && j < b.length) {
+            if (a[i] == b[j]) {
+                i++
+                j++
+                continue
+            }
+
+            edits++
+            if (edits > 1) return false
+
+            when {
+                a.length > b.length -> i++
+                b.length > a.length -> j++
+                else -> {
+                    i++
+                    j++
+                }
+            }
+        }
+
+        if (i < a.length || j < b.length) edits++
+        return edits <= 1
     }
 
     private fun confirmSelectedCall() {
