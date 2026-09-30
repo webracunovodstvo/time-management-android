@@ -19,6 +19,14 @@
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
 
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+
+        <meta-data
+            android:name="androidx.car.app.minCarApiLevel"
+            android:value="6" />
+
         <activity
             android:name=".CandidateActivity"
             android:exported="false"
@@ -40,6 +48,16 @@
             android:name=".VoiceDialService"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <service
+            android:name=".HaloCarAppService"
+            android:exported="true"
+            android:label="Halo Telefon">
+            <intent-filter>
+                <action android:name="androidx.car.app.CarAppService" />
+                <category android:name="androidx.car.app.category.CALLING" />
+            </intent-filter>
+        </service>
 
         <receiver
             android:name=".CandidateReceiver"
