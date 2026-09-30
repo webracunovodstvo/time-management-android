@@ -22,6 +22,7 @@ class CarVoiceController(
         val key: String,
         val name: String,
         val number: String,
+        val numberSummary: String,
         val score: Double,
         val uses: Int
     )
@@ -483,6 +484,10 @@ class CarVoiceController(
                 key = it.contact.lookupKey,
                 name = it.contact.displayName,
                 number = it.contact.number,
+                numberSummary =
+                    it.contact.numberSummary(
+                        compact = true
+                    ),
                 score = it.score,
                 uses = learningStore.totalUses(it.contact.lookupKey)
             )
