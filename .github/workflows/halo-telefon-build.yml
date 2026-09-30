@@ -33,6 +33,7 @@ jobs:
           test -f /tmp/halo-src/HaloTelefon/app/src/main/AndroidManifest.xml
           test -f /tmp/halo-src/HaloTelefon/app/src/main/java/rs/halotelefon/AcousticWakeStore.kt
           test -f /tmp/halo-src/HaloTelefon/app/src/main/java/rs/halotelefon/NameSegmenter.kt
+          test -f /tmp/halo-src/HaloTelefon/app/src/main/java/rs/halotelefon/ConfirmationSegmenter.kt
           grep -q 'versionName = "0.11.0"' /tmp/halo-src/HaloTelefon/app/build.gradle.kts
           grep -q 'ggml-base-q5_1.bin' /tmp/halo-src/HaloTelefon/scripts/setup.sh
 
