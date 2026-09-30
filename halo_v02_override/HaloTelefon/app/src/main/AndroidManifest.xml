@@ -28,6 +28,10 @@
             android:value="6" />
 
         <activity
+            android:name=".SettingsActivity"
+            android:exported="false" />
+
+        <activity
             android:name=".CandidateActivity"
             android:exported="false"
             android:excludeFromRecents="true"
