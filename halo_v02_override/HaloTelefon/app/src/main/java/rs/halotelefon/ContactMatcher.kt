@@ -66,7 +66,7 @@ class ContactMatcher(private val learningStore: LearningStore) {
         spoken: String,
         displayName: String
     ): Double {
-        var best = SerbianNormalizer.similarity(
+        var best = combinedSimilarity(
             spoken,
             displayName
         )
@@ -86,7 +86,7 @@ class ContactMatcher(private val learningStore: LearningStore) {
         for (token in tokens) {
             best = maxOf(
                 best,
-                SerbianNormalizer.similarity(
+                combinedSimilarity(
                     spoken,
                     token
                 )
@@ -102,7 +102,7 @@ class ContactMatcher(private val learningStore: LearningStore) {
                         tokens[index + 1]
                 best = maxOf(
                     best,
-                    SerbianNormalizer.similarity(
+                    combinedSimilarity(
                         spoken,
                         pair
                     )
@@ -111,5 +111,30 @@ class ContactMatcher(private val learningStore: LearningStore) {
         }
 
         return best
+    }
+
+    private fun combinedSimilarity(
+        spoken: String,
+        target: String
+    ): Double {
+        val orthographic =
+            SerbianNormalizer.similarity(spoken, target)
+        val phonetic =
+            SerbianPhonetics.similarity(spoken, target)
+
+        val spokenLength =
+            SerbianPhonetics.phonemes(spoken).size
+
+        // Short names have very little linguistic context, so phonetic
+        // proximity gets full weight. For longer names, keep orthography
+        // slightly dominant to avoid overly broad matches.
+        val weightedPhonetic =
+            if (spokenLength <= 5) phonetic
+            else phonetic * 0.97
+
+        return maxOf(
+            orthographic,
+            weightedPhonetic
+        ).coerceIn(0.0, 1.0)
     }
 }
