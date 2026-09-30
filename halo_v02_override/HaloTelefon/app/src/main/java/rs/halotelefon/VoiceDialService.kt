@@ -237,33 +237,7 @@ class VoiceDialService : Service() {
                 Mode.WAIT_WAKE -> handleWake(audio)
                 Mode.TRAIN_WAKE -> handleWakeTraining(audio)
                 Mode.WAIT_NAME -> {
-                    val rawSeconds = audio.size / SAMPLE_RATE.toDouble()
-                    val padded = padForWhisper(audio)
-                    val paddedSeconds = padded.size / SAMPLE_RATE.toDouble()
-                    val contacts = getContacts()
-                    val prompt = buildContactPrompt()
-
-                    val started = SystemClock.elapsedRealtime()
-                    val text = try {
-                        whisper.transcribe(
-                            samples = padded,
-                            language = "sr",
-                            initialPrompt = prompt,
-                            threads = 4
-                        ).trim()
-                    } catch (t: Throwable) {
-                        AppPrefs.setNameDebug(this, "Whisper greška: ${t.message}")
-                        ""
-                    }
-                    val elapsed = SystemClock.elapsedRealtime() - started
-                    nameInferencePending = false
-
-                    AppPrefs.setNameDebug(
-                        this,
-                        "Audio ${"%.2f".format(rawSeconds)} s → ${"%.2f".format(paddedSeconds)} s • " +
-                            "Whisper ${elapsed} ms • raw: ${if (text.isBlank()) "(prazno)" else text}"
-                    )
-
+                    val text = transcribeShort(audio, buildContactPrompt(), "ime")
                     if (text.isBlank()) {
                         AppPrefs.setLastHeard(this, "(Whisper nije vratio tekst)")
                         fail("Nisam razumeo ime. Reci ponovo ‘Halo telefon’.")
@@ -273,12 +247,92 @@ class VoiceDialService : Service() {
                     }
 
                     AppPrefs.setLastHeard(this, text)
-                    handleNameForms(listOf(text), contacts)
+                    handleNameForms(listOf(text), getContacts())
                 }
+
+                Mode.WAIT_CONFIRM -> {
+                    val text = transcribeShort(
+                        audio,
+                        "Kratka komanda: može, ok, zovi. Ili ime i prezime osobe.",
+                        "potvrda"
+                    )
+                    if (text.isBlank()) {
+                        AppPrefs.setStatus(this, "Nisam razumeo. Reci ‘može’, ‘ok’, ‘zovi’ ili drugo ime.")
+                        beepError()
+                        continue
+                    }
+
+                    AppPrefs.setLastHeard(this, text)
+                    if (isConfirmation(text)) {
+                        confirmSelectedCall()
+                    } else {
+                        handleNameForms(listOf(text), getContacts())
+                    }
+                }
+
             }
         }
     }
 
+    private fun transcribeShort(audio: FloatArray, prompt: String, label: String): String {
+        val padded = padForWhisper(audio)
+        val started = SystemClock.elapsedRealtime()
+        val text = try {
+            whisper.transcribe(
+                samples = padded,
+                language = "sr",
+                initialPrompt = prompt,
+                threads = 4
+            ).trim()
+        } catch (t: Throwable) {
+            AppPrefs.setNameDebug(this, "Whisper greška: " + t.message)
+            ""
+        }
+        val elapsed = SystemClock.elapsedRealtime() - started
+        nameInferencePending = false
+        AppPrefs.setNameDebug(
+            this,
+            label + " • Whisper " + elapsed + " ms • raw: " +
+                (if (text.isBlank()) "(prazno)" else text)
+        )
+        return text
+    }
+
+    private fun isConfirmation(raw: String): Boolean {
+        val normalized = SerbianNormalizer.normalize(raw)
+        val words = normalized.split(' ').filter { it.isNotBlank() }.toSet()
+        return normalized in setOf("moze", "ok", "zovi") ||
+            words.any { it in setOf("moze", "ok", "zovi") }
+    }
+
+    private fun confirmSelectedCall() {
+        val contact = selectedContact
+        if (contact == null) {
+            AppPrefs.setStatus(this, "Nema izabranog kontakta. Izgovori ime ponovo.")
+            mode = Mode.WAIT_NAME
+            beepError()
+            return
+        }
+
+        if (checkSelfPermission(Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) {
+            fail("Nema dozvole za pozivanje")
+            return
+        }
+
+        if (selectedSpoken.isNotBlank()) {
+            runCatching { learningStore.record(selectedSpoken, contact.lookupKey) }
+        }
+
+        AppPrefs.setLastMatch(this, "Potvrđeno: " + contact.displayName)
+        AppPrefs.setStatus(this, "Pozivam " + contact.displayName)
+        sendBroadcast(Intent(CandidateActivity.ACTION_CLOSE_PICKER).setPackage(packageName))
+        getSystemService(NotificationManager::class.java).cancel(CANDIDATE_NOTIFICATION_ID)
+        clearPendingChoice()
+        mode = Mode.WAIT_WAKE
+        updateServiceNotification("Slušam: ‘Halo telefon’")
+        beepSuccess()
+        CallPlacer.call(this, contact.number)
+    }
     private fun handleWake(audio: FloatArray) {
         if (!acousticWakeStore.isReady()) {
             AppPrefs.setStatus(this, "Wake profil nije naučen. Pritisni ‘Nauči izgovor’.")
