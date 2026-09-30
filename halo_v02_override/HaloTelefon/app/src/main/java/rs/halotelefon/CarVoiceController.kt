@@ -81,8 +81,17 @@ class CarVoiceController(
                 if (state.candidates.isNotEmpty()) {
                     val commandText = transcribe(
                         audio,
-                        "zovi, može, ok, okej, pozovi"
+                        "zovi, može, ok, okej, pozovi, otkaži"
                     )
+
+                    if (isCancelCommand(commandText)) {
+                        update(
+                            State(
+                                status = "Otkazano. Dodirni mikrofon za novi kontakt."
+                            )
+                        )
+                        return@execute
+                    }
 
                     if (isConfirmation(commandText)) {
                         confirm()
@@ -96,6 +105,15 @@ class CarVoiceController(
                             state.copy(
                                 status = "Nisam razumeo. Reci MOŽE, OK, ZOVI ili drugo ime.",
                                 listening = false
+                            )
+                        )
+                        return@execute
+                    }
+
+                    if (nameForms.any { isCancelCommand(it) }) {
+                        update(
+                            State(
+                                status = "Otkazano. Dodirni mikrofon za novi kontakt."
                             )
                         )
                         return@execute
@@ -317,6 +335,27 @@ class CarVoiceController(
         return builder.toString()
     }
 
+    private fun isCancelCommand(raw: String): Boolean {
+        val normalized = normalizeCommand(raw)
+        if (normalized.isBlank()) return false
+
+        return normalized
+            .split(' ')
+            .filter { it.isNotBlank() }
+            .any { word ->
+                word in setOf(
+                    "otkazi",
+                    "odustani",
+                    "ponisti",
+                    "prekini"
+                ) ||
+                    editDistanceAtMostOne(
+                        word,
+                        "otkazi"
+                    )
+            }
+    }
+
     private fun isConfirmation(raw: String): Boolean {
         val normalized = normalizeCommand(raw)
         if (normalized.isBlank()) return false
@@ -346,6 +385,10 @@ class CarVoiceController(
             .replace("позови", "pozovi")
             .replace("океј", "okej")
             .replace("ок", "ok")
+            .replace("откажи", "otkazi")
+            .replace("одустани", "odustani")
+            .replace("поништи", "ponisti")
+            .replace("прекини", "prekini")
             .replace('đ', 'd')
 
         value = Normalizer.normalize(value, Normalizer.Form.NFD)
