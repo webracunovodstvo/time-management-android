@@ -92,6 +92,20 @@ class VoiceDialService : Service() {
         val wasRunning = running
 
         when (action) {
+            ACTION_SELECT_CANDIDATE -> {
+                val key = intent.getStringExtra(EXTRA_LOOKUP_KEY).orEmpty()
+                val name = intent.getStringExtra(EXTRA_NAME).orEmpty()
+                val number = intent.getStringExtra(EXTRA_NUMBER).orEmpty()
+                if (key.isNotBlank() && name.isNotBlank() && number.isNotBlank()) {
+                    selectedContact = ContactPhone(key, name, number)
+                    mode = Mode.WAIT_CONFIRM
+                    nameInferencePending = false
+                    segmentQueue.clear()
+                    AppPrefs.setStatus(this, "Izabrano: " + name + ". Reci ‘može’, ‘ok’ ili ‘zovi’.")
+                    updateServiceNotification("Čekam potvrdu: može / ok / zovi")
+                    beepReady()
+                }
+            }
             ACTION_TRAIN_WAKE -> {
                 clearPendingChoice()
                 acousticWakeStore.clear()
