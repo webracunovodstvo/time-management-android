@@ -163,6 +163,10 @@ class VoiceDialService : Service() {
                         AppPrefs.setStatus(this, "Test imena. Posle tona reci ime i prezime.")
                         updateServiceNotification("Test: reci ime kontakta")
                     }
+                    Mode.WAIT_CONFIRM -> {
+                        AppPrefs.setStatus(this, "Reci ‘može’, ‘ok’, ‘zovi’ ili izgovori drugo ime.")
+                        updateServiceNotification("Čekam potvrdu ili novo ime")
+                    }
                     Mode.WAIT_WAKE -> {
                         AppPrefs.setStatus(
                             this,
@@ -177,7 +181,7 @@ class VoiceDialService : Service() {
                 }
 
                 startRecordingLoop()
-                if (mode == Mode.TRAIN_WAKE || mode == Mode.WAIT_NAME) beepReady()
+                if (mode == Mode.TRAIN_WAKE || mode == Mode.WAIT_NAME || mode == Mode.WAIT_CONFIRM) beepReady()
                 startInferenceLoop()
             } catch (t: Throwable) {
                 AppPrefs.setStatus(this, "Greška: ${t.message}")
