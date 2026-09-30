@@ -53,7 +53,7 @@ private class HaloCarScreen(carContext: CarContext) : Screen(carContext) {
                     )
 
                 if (selected) {
-                    row.addText("IZABRAN • reci MOŽE, OK ili ZOVI")
+                    row.addText("IZABRAN • reci MOŽE / OK / ZOVI • ili OTKAŽI")
                 }
                 list.addItem(row.build())
             }
