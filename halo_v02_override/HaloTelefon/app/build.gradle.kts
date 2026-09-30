@@ -11,8 +11,8 @@ android {
         applicationId = "rs.halotelefon"
         minSdk = 26
         targetSdk = 35
-        versionCode = 8
-        versionName = "0.8.0"
+        versionCode = 9
+        versionName = "0.9.0"
     }
 
     buildTypes {
@@ -36,4 +36,7 @@ android {
 
 dependencies {
     implementation(project(":whisperlib"))
+    implementation("androidx.car.app:app:1.7.0")
+    implementation("androidx.car.app:app-projected:1.7.0")
+    implementation("androidx.core:core:1.15.0")
 }
