@@ -23,7 +23,7 @@ class VoiceDialService : Service() {
     companion object {
         const val ACTION_STOP = "rs.halotelefon.STOP"
         const val ACTION_TRAIN_WAKE = "rs.halotelefon.TRAIN_WAKE"
-        const val ACTION_TEST_NAME = "rs.halotelefon.TEST_NAME"
+        const val ACTION_TEST_NAME = "rs.halotelefon.TEST_NAME"\n        const val ACTION_SELECT_CANDIDATE = "rs.halotelefon.SELECT_CANDIDATE"\n        const val EXTRA_LOOKUP_KEY = "lookupKey"\n        const val EXTRA_NAME = "name"\n        const val EXTRA_NUMBER = "number"
         private const val CHANNEL_ID = "halo_voice"
         private const val NOTIFICATION_ID = 1001
         private const val CANDIDATE_NOTIFICATION_ID = 1002
@@ -31,14 +31,14 @@ class VoiceDialService : Service() {
         private const val SAMPLE_RATE = 16_000
     }
 
-    private enum class Mode { WAIT_WAKE, WAIT_NAME, TRAIN_WAKE }
+    private enum class Mode { WAIT_WAKE, WAIT_NAME, WAIT_CONFIRM, TRAIN_WAKE }
 
     @Volatile private var mode = Mode.WAIT_WAKE
     @Volatile private var running = false
     @Volatile private var trainRemaining = 0
     @Volatile private var nameInferencePending = false
     private var pendingSpoken: String? = null
-    private var pendingCandidates: List<ContactPhone> = emptyList()
+    private var pendingCandidates: List<ContactPhone> = emptyList()\n    private var selectedContact: ContactPhone? = null\n    private var selectedSpoken: String = ""
 
     private val audioExecutor = Executors.newSingleThreadExecutor()
     private val inferenceExecutor = Executors.newSingleThreadExecutor()
