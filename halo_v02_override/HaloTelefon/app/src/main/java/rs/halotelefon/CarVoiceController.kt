@@ -104,6 +104,11 @@ class CarVoiceController(
                         return@execute
                     }
 
+                    if (isConfirmation(nameText)) {
+                        confirm()
+                        return@execute
+                    }
+
                     rankNewName(nameText)
                 } else {
                     val nameText = transcribe(
@@ -214,9 +219,11 @@ class CarVoiceController(
             .filter { it.isNotBlank() }
             .any { word ->
                 when {
-                    word == "ok" || word == "okej" || word == "okay" -> true
-                    word == "zovi" || word == "pozovi" || word.endsWith("zovi") -> true
-                    word == "moze" -> true
+                    word == "ok" || word == "okej" || word == "okay" ||
+                        word == "oke" || word == "okey" -> true
+                    word == "zovi" || word == "pozovi" || word == "zov" ||
+                        word == "zove" || word.endsWith("zovi") -> true
+                    word == "moze" || word == "mozes" || word == "mozeh" -> true
                     editDistanceAtMostOne(word, "zovi") -> true
                     editDistanceAtMostOne(word, "moze") -> true
                     else -> false
