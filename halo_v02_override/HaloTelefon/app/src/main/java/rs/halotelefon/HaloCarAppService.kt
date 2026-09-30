@@ -47,13 +47,15 @@ private class HaloCarScreen(carContext: CarContext) : Screen(carContext) {
                 val selected = index == state.selectedIndex
                 val row = Row.Builder()
                     .setTitle((if (selected) "✓ " else "") + candidate.name)
-                    .addText(
-                        "Birano " + candidate.uses + "×  •  " +
-                            "poklapanje " + "%.0f".format(candidate.score * 100) + "%"
-                    )
+                    .addText(candidate.numberSummary)
 
                 if (selected) {
-                    row.addText("IZABRAN • reci MOŽE / OK / ZOVI • ili OTKAŽI")
+                    row.addText("IZABRAN • MOŽE / OK / ZOVI • OTKAŽI")
+                } else {
+                    row.addText(
+                        "Birano " + candidate.uses + "×  •  " +
+                            "%.0f".format(candidate.score * 100) + "%"
+                    )
                 }
                 list.addItem(row.build())
             }
