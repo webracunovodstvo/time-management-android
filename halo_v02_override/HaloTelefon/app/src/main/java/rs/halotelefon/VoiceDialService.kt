@@ -386,57 +386,30 @@ class VoiceDialService : Service() {
 
     private fun handleNameForms(forms: List<String>, contacts: List<ContactPhone>) {
         nameInferencePending = false
+        val spoken = forms.lastOrNull().orEmpty().trim()
         AppPrefs.setStatus(this, "Tražim kontakt…")
 
-        val ranked = ContactMatcher(learningStore).rankBestOf(forms, contacts, 20)
+        val ranked = ContactMatcher(learningStore).rankBestOf(forms, contacts, 30)
         val best = ranked.getOrNull(0)
-        val second = ranked.getOrNull(1)
 
         if (best == null || best.score < 0.58) {
             clearPendingChoice()
-            mode = Mode.WAIT_WAKE
-            updateServiceNotification("Slušam: ‘Halo telefon’")
-            fail("Nisam našao dovoljno sličan kontakt za: " + forms.lastOrNull().orEmpty())
+            mode = Mode.WAIT_NAME
+            AppPrefs.setStatus(this, "Nisam našao kontakt. Reci ime ponovo.")
+            updateServiceNotification("Reci drugo ime")
+            beepError()
             return
         }
 
-        val margin = best.score - (second?.score ?: 0.0)
-        val learnedStrong = best.learnedUses >= 1 && best.score >= 0.84
-        val strong = best.score >= 0.87 && margin >= 0.06
-
-        if (learnedStrong || strong) {
-            if (checkSelfPermission(Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) {
-                clearPendingChoice()
-                mode = Mode.WAIT_WAKE
-                fail("Nema dozvole za pozivanje")
-                return
-            }
-
-            val learnedPhrase = forms.lastOrNull().orEmpty()
-            if (learnedPhrase.isNotBlank()) {
-                runCatching { learningStore.record(learnedPhrase, best.contact.lookupKey) }
-            }
-
-            clearPendingChoice()
-            mode = Mode.WAIT_WAKE
-            updateServiceNotification("Slušam: ‘Halo telefon’")
-            AppPrefs.setLastMatch(
-                this,
-                best.contact.displayName + " (" + "%.0f".format(best.score * 100) + "%)"
-            )
-            AppPrefs.setStatus(this, "Pozivam " + best.contact.displayName)
-            beepSuccess()
-            CallPlacer.call(this, best.contact.number)
-            return
-        }
-
-        val floor = maxOf(0.58, best.score - 0.12)
+        val floor = maxOf(0.58, best.score - 0.16)
         val plausible = ranked
             .filter { it.score >= floor }
             .distinctBy {
                 SerbianNormalizer.normalize(it.contact.displayName) + "|" +
                     it.contact.number.filter(Char::isDigit).takeLast(12)
             }
+
+        val ordered = plausible
             .sortedWith(
                 compareByDescending<ContactCandidate> {
                     learningStore.totalUses(it.contact.lookupKey)
@@ -447,19 +420,35 @@ class VoiceDialService : Service() {
                 }
             )
             .take(5)
+            .ifEmpty { listOf(best) }
 
-        clearPendingChoice()
-        mode = Mode.WAIT_WAKE
-        updateServiceNotification("Slušam: ‘Halo telefon’")
-        AppPrefs.setStatus(this, "Izaberi kontakt sa ekrana.")
-        showCandidatePicker(forms.lastOrNull().orEmpty(), plausible.ifEmpty { listOf(best) })
+        val selected = ordered.maxWithOrNull(
+            compareBy<ContactCandidate> { it.score }
+                .thenBy { learningStore.totalUses(it.contact.lookupKey) }
+        ) ?: ordered.first()
+
+        pendingSpoken = spoken
+        selectedSpoken = spoken
+        pendingCandidates = ordered.map { it.contact }
+        selectedContact = selected.contact
+        mode = Mode.WAIT_CONFIRM
+
+        AppPrefs.setStatus(
+            this,
+            "Označen: " + selected.contact.displayName +
+                ". Reci ‘može’, ‘ok’, ‘zovi’ ili izgovori drugo ime."
+        )
+        updateServiceNotification("Čekam potvrdu ili drugo ime")
+        showCandidatePicker(spoken, ordered, selected.contact)
+        beepReady()
     }
 
     private fun clearPendingChoice() {
         pendingSpoken = null
         pendingCandidates = emptyList()
+        selectedContact = null
+        selectedSpoken = ""
     }
-
     private fun loadContactsSafely(): List<ContactPhone> {
         if (checkSelfPermission(Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
             return emptyList()
@@ -484,7 +473,7 @@ class VoiceDialService : Service() {
         return out
     }
 
-    private fun showCandidatePicker(spoken: String, candidates: List<ContactCandidate>) {
+    private fun showCandidatePicker(spoken: String, candidates: List<ContactCandidate>, selected: ContactPhone) {
         val ordered = candidates
             .distinctBy {
                 SerbianNormalizer.normalize(it.contact.displayName) + "|" +
@@ -505,7 +494,7 @@ class VoiceDialService : Service() {
         val numbers = ArrayList(ordered.map { it.contact.number })
         val keys = ArrayList(ordered.map { it.contact.lookupKey })
         val uses = ArrayList(ordered.map { learningStore.totalUses(it.contact.lookupKey) })
-        val scores = ordered.map { it.score }.toDoubleArray()
+        val scores = ordered.map { it.score }.toDoubleArray()\n        val selectedIndex = ordered.indexOfFirst {\n            it.contact.lookupKey == selected.lookupKey && it.contact.number == selected.number\n        }.coerceAtLeast(0)
 
         AppPrefs.setLastMatch(
             this,
@@ -521,7 +510,7 @@ class VoiceDialService : Service() {
             putStringArrayListExtra(CandidateActivity.EXTRA_NUMBERS, numbers)
             putStringArrayListExtra(CandidateActivity.EXTRA_KEYS, keys)
             putIntegerArrayListExtra(CandidateActivity.EXTRA_USES, uses)
-            putExtra(CandidateActivity.EXTRA_SCORES, scores)
+            putExtra(CandidateActivity.EXTRA_SCORES, scores)\n            putExtra(CandidateActivity.EXTRA_SELECTED_INDEX, selectedIndex)
             addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK or
                     Intent.FLAG_ACTIVITY_CLEAR_TOP or
