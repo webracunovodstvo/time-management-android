@@ -276,7 +276,8 @@ class VoiceDialService : Service() {
         audioExecutor.execute {
             val frameShort = ShortArray(320)
             val wakeSegmenter = VoiceSegmenter()
-            val speechSegmenter = NameSegmenter()
+            val nameSegmenter = NameSegmenter()
+            val confirmationSegmenter = ConfirmationSegmenter()
             var observedMode = mode
 
             recorder.startRecording()
@@ -298,13 +299,15 @@ class VoiceDialService : Service() {
 
                 if (currentMode != observedMode) {
                     wakeSegmenter.reset()
-                    speechSegmenter.reset()
+                    nameSegmenter.reset()
+                    confirmationSegmenter.reset()
                     observedMode = currentMode
                 }
 
                 if (SystemClock.elapsedRealtime() < ignoreAudioUntilMs) {
                     wakeSegmenter.reset()
-                    speechSegmenter.reset()
+                    nameSegmenter.reset()
+                    confirmationSegmenter.reset()
                     continue
                 }
 
@@ -313,39 +316,24 @@ class VoiceDialService : Service() {
                 }
 
                 when (currentMode) {
-                    Mode.WAIT_NAME,
-                    Mode.WAIT_CONFIRM -> {
+                    Mode.WAIT_NAME -> {
                         if (nameInferencePending) continue
 
-                        val wasSpeaking = speechSegmenter.speechStarted
-                        val segment = speechSegmenter.accept(frame)
+                        val wasSpeaking = nameSegmenter.speechStarted
+                        val segment = nameSegmenter.accept(frame)
 
-                        if (!wasSpeaking && speechSegmenter.speechStarted) {
-                            if (currentMode == Mode.WAIT_CONFIRM) {
-                                AppPrefs.setStatus(this, "Čujem potvrdu ili novo ime…")
-                                updateServiceNotification("Slušam potvrdu ili novo ime…")
-                            } else {
-                                AppPrefs.setStatus(this, "Čujem ime…")
-                                updateServiceNotification("Čujem ime kontakta…")
-                            }
+                        if (!wasSpeaking && nameSegmenter.speechStarted) {
+                            AppPrefs.setStatus(this, "Čujem ime…")
+                            updateServiceNotification("Čujem ime kontakta…")
                         }
 
-                        if (speechSegmenter.timedOut) {
-                            speechSegmenter.reset()
-
-                            if (currentMode == Mode.WAIT_CONFIRM) {
-                                AppPrefs.setStatus(
-                                    this,
-                                    "Čekam: ‘može’, ‘ok’, ‘zovi’ ili drugo ime."
-                                )
-                                updateServiceNotification("Čekam potvrdu ili novo ime")
-                                continue
-                            }
-
+                        if (nameSegmenter.timedOut) {
+                            nameSegmenter.reset()
                             mode = Mode.WAIT_WAKE
                             observedMode = mode
                             selectedContact = null
                             selectedSpoken = ""
+
                             AppPrefs.setStatus(
                                 this,
                                 "Nisam čuo ime. Reci ponovo ‘Halo telefon’."
@@ -361,38 +349,64 @@ class VoiceDialService : Service() {
 
                         if (segment != null && segment.size >= 8_000) {
                             nameInferencePending = true
-
-                            if (currentMode == Mode.WAIT_CONFIRM) {
-                                AppPrefs.setStatus(this, "Proveravam potvrdu…")
-                                AppPrefs.setNameDebug(
-                                    this,
-                                    "Snimljena potvrda ili novo ime"
-                                )
-                                updateServiceNotification("Proveravam potvrdu…")
-                            } else {
-                                AppPrefs.setStatus(this, "Prepoznajem ime…")
-                                AppPrefs.setNameDebug(
-                                    this,
-                                    "Snimljeno ime, pokrećem lokalni Whisper…"
-                                )
-                                updateServiceNotification("Prepoznajem ime…")
-                            }
+                            AppPrefs.setStatus(this, "Prepoznajem ime…")
+                            AppPrefs.setNameDebug(
+                                this,
+                                "Snimljeno ime, pokrećem lokalni Whisper…"
+                            )
+                            updateServiceNotification("Prepoznajem ime…")
 
                             if (!segmentQueue.offer(segment)) {
                                 nameInferencePending = false
+                                mode = Mode.WAIT_WAKE
+                                AppPrefs.setStatus(
+                                    this,
+                                    "Audio red je zauzet. Pokušaj ponovo."
+                                )
+                                updateServiceNotification("Slušam: ‘Halo telefon’")
+                                beepError()
+                            }
+                        }
+                    }
 
-                                if (currentMode == Mode.WAIT_CONFIRM) {
-                                    AppPrefs.setStatus(
-                                        this,
-                                        "Pokušaj potvrdu ponovo."
-                                    )
-                                } else {
-                                    mode = Mode.WAIT_WAKE
-                                    updateServiceNotification(
-                                        "Slušam: ‘Halo telefon’"
-                                    )
-                                }
+                    Mode.WAIT_CONFIRM -> {
+                        if (nameInferencePending) continue
 
+                        val wasSpeaking = confirmationSegmenter.speechStarted
+                        val segment = confirmationSegmenter.accept(frame)
+
+                        if (!wasSpeaking && confirmationSegmenter.speechStarted) {
+                            AppPrefs.setStatus(this, "Čujem potvrdu ili novo ime…")
+                            updateServiceNotification("Slušam potvrdu ili novo ime…")
+                        }
+
+                        if (confirmationSegmenter.timedOut) {
+                            confirmationSegmenter.reset()
+                            AppPrefs.setStatus(
+                                this,
+                                "Čekam: ‘može’, ‘ok’, ‘okej’, ‘zovi’ ili drugo ime."
+                            )
+                            updateServiceNotification("Čekam potvrdu ili novo ime")
+                            continue
+                        }
+
+                        // Short commands must be allowed through; 0.2 s is enough
+                        // because ConfirmationSegmenter includes pre-roll/silence
+                        // and Whisper gets extra padding before inference.
+                        if (segment != null && segment.size >= 3_200) {
+                            nameInferencePending = true
+                            AppPrefs.setStatus(this, "Proveravam potvrdu…")
+                            AppPrefs.setNameDebug(
+                                this,
+                                "Kratka potvrda/novo ime: " +
+                                    "%.2f".format(segment.size / SAMPLE_RATE.toDouble()) +
+                                    " s"
+                            )
+                            updateServiceNotification("Proveravam potvrdu…")
+
+                            if (!segmentQueue.offer(segment)) {
+                                nameInferencePending = false
+                                AppPrefs.setStatus(this, "Pokušaj potvrdu ponovo.")
                                 beepError()
                             }
                         }
