@@ -302,7 +302,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         }
 
         root.addView(TextView(this).apply {
-            text = "v0.8  •  Veliki izbor kontakta • redosled uči tvoje izbore • 100% lokalno."
+            text = "v0.9  •  Vizuelna potvrda + MOŽE / OK / ZOVI • Android Auto test režim."
             textSize = 12f
             setTextColor(muted)
             gravity = Gravity.CENTER
