@@ -435,14 +435,10 @@ class VoiceDialService : Service() {
                 Mode.TRAIN_WAKE -> handleWakeTraining(audio)
 
                 Mode.WAIT_NAME -> {
-                    val text = transcribeShort(
-                        audio,
-                        buildContactPrompt(),
-                        "ime"
-                    )
+                    val forms = recognizeNameForms(audio)
                     nameInferencePending = false
 
-                    if (text.isBlank()) {
+                    if (forms.isEmpty()) {
                         AppPrefs.setLastHeard(
                             this,
                             "(Whisper nije vratio tekst)"
@@ -457,8 +453,11 @@ class VoiceDialService : Service() {
                         continue
                     }
 
-                    AppPrefs.setLastHeard(this, text)
-                    handleName(text)
+                    AppPrefs.setLastHeard(
+                        this,
+                        forms.joinToString(" / ")
+                    )
+                    handleNameForms(forms)
                 }
 
                 Mode.WAIT_CONFIRM -> {
@@ -479,14 +478,10 @@ class VoiceDialService : Service() {
 
                     // Only when the command pass clearly was NOT a confirmation do
                     // we run the same audio as a possible replacement contact name.
-                    val nameText = transcribeShort(
-                        audio,
-                        buildContactPrompt(),
-                        "novo ime"
-                    )
+                    val nameForms = recognizeNameForms(audio)
                     nameInferencePending = false
 
-                    if (nameText.isBlank()) {
+                    if (nameForms.isEmpty()) {
                         AppPrefs.setStatus(
                             this,
                             "Nisam razumeo. Reci ‘može’, ‘ok’, ‘zovi’ ili drugo ime."
@@ -495,17 +490,23 @@ class VoiceDialService : Service() {
                         continue
                     }
 
-                    // The second ASR pass may actually recognize the command
-                    // better than the command-biased pass. Check it again before
-                    // ever sending it to contact matching.
-                    if (isConfirmation(nameText)) {
-                        AppPrefs.setLastHeard(this, nameText)
+                    val confirmationFromFallback =
+                        nameForms.firstOrNull { isConfirmation(it) }
+
+                    if (confirmationFromFallback != null) {
+                        AppPrefs.setLastHeard(
+                            this,
+                            confirmationFromFallback
+                        )
                         confirmSelectedCall()
                         continue
                     }
 
-                    AppPrefs.setLastHeard(this, nameText)
-                    handleName(nameText)
+                    AppPrefs.setLastHeard(
+                        this,
+                        nameForms.joinToString(" / ")
+                    )
+                    handleNameForms(nameForms)
                 }
             }
         }
@@ -768,13 +769,24 @@ class VoiceDialService : Service() {
         }
     }
 
-    private fun handleName(spokenRaw: String) {
-        val spoken = spokenRaw.trim()
+    private fun handleNameForms(spokenForms: List<String>) {
+        val forms = spokenForms
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+
+        if (forms.isEmpty()) {
+            mode = Mode.WAIT_NAME
+            AppPrefs.setStatus(this, "Nisam razumeo ime. Reci ponovo.")
+            beepError()
+            return
+        }
+
         AppPrefs.setStatus(this, "Tražim kontakt…")
 
         val contacts = getContacts()
         val ranked = ContactMatcher(learningStore)
-            .rank(spoken, contacts, 30)
+            .rankBestOf(forms, contacts, 30)
 
         val best = ranked.firstOrNull()
 
@@ -834,7 +846,11 @@ class VoiceDialService : Service() {
         ) ?: ordered.first()
 
         selectedContact = selected.contact
-        selectedSpoken = spoken
+
+        // Keep the first/raw transcript as the learned alias. If Whisper
+        // consistently hears a short Serbian name the same wrong way,
+        // confirmation teaches that acoustic spelling to the chosen contact.
+        selectedSpoken = forms.first()
         mode = Mode.WAIT_CONFIRM
 
         AppPrefs.setStatus(
@@ -848,7 +864,7 @@ class VoiceDialService : Service() {
         )
 
         showCandidatePicker(
-            spoken,
+            forms.joinToString(" / "),
             ordered,
             selected.contact
         )
@@ -881,6 +897,117 @@ class VoiceDialService : Service() {
 
     private fun buildContactPrompt(): String =
         "Ime i prezime osobe iz telefonskog imenika u Srbiji."
+
+    private fun buildShortNamePrompt(
+        contacts: List<ContactPhone>
+    ): String {
+        val orderedContacts = contacts.sortedWith(
+            compareByDescending<ContactPhone> {
+                learningStore.totalUses(it.lookupKey)
+            }.thenBy {
+                it.displayName.length
+            }
+        )
+
+        val tokens = LinkedHashSet<String>()
+
+        for (contact in orderedContacts) {
+            val clean = contact.displayName
+                .replace(
+                    Regex("[#@()\\[\\]{}.,;:_/\\\\|-]+"),
+                    " "
+                )
+                .replace(Regex("\\s+"), " ")
+                .trim()
+
+            for (token in clean.split(' ')) {
+                val candidate = token.trim()
+                if (candidate.length in 2..12) {
+                    val key =
+                        SerbianNormalizer.normalize(candidate)
+                    if (key.isNotBlank()) {
+                        tokens.add(candidate)
+                    }
+                }
+            }
+        }
+
+        val prefix =
+            "Moguća imena kontakata. Izgovor je na srpskom: "
+        val builder = StringBuilder(prefix)
+
+        for (token in tokens) {
+            if (builder.length + token.length + 2 > 1600) {
+                break
+            }
+            if (builder.length > prefix.length) {
+                builder.append(", ")
+            }
+            builder.append(token)
+        }
+
+        return builder.toString()
+    }
+
+    private fun recognizeNameForms(
+        audio: FloatArray
+    ): List<String> {
+        val contacts = getContacts()
+        val forms = ArrayList<String>(2)
+
+        val primary = transcribeShort(
+            audio,
+            buildContactPrompt(),
+            "ime"
+        ).trim()
+
+        if (primary.isNotBlank()) {
+            forms.add(primary)
+        }
+
+        val primaryScore = if (primary.isBlank()) {
+            0.0
+        } else {
+            ContactMatcher(learningStore)
+                .rank(primary, contacts, 1)
+                .firstOrNull()
+                ?.score ?: 0.0
+        }
+
+        val shortAudio =
+            audio.size.toDouble() / SAMPLE_RATE <= 1.35
+
+        if (
+            shortAudio ||
+            primary.isBlank() ||
+            primaryScore < 0.78
+        ) {
+            val contactAware = transcribeShort(
+                audio,
+                buildShortNamePrompt(contacts),
+                "ime + imenik"
+            ).trim()
+
+            if (
+                contactAware.isNotBlank() &&
+                contactAware !in forms
+            ) {
+                forms.add(contactAware)
+            }
+        }
+
+        AppPrefs.setNameDebug(
+            this,
+            "Ime kandidati: " +
+                if (forms.isEmpty()) {
+                    "(prazno)"
+                } else {
+                    forms.joinToString(" / ")
+                }
+        )
+
+        return forms
+    }
 
     private fun padForWhisper(audio: FloatArray): FloatArray {
         val prefix = (SAMPLE_RATE * 0.35).toInt()
