@@ -1137,6 +1137,14 @@ class VoiceDialService : Service() {
             }
         )
 
+        val numberDetails = ArrayList(
+            ordered.map {
+                it.contact.numberSummary(
+                    compact = false
+                )
+            }
+        )
+
         val keys = ArrayList(
             ordered.map {
                 it.contact.lookupKey
@@ -1192,6 +1200,10 @@ class VoiceDialService : Service() {
             putStringArrayListExtra(
                 CandidateActivity.EXTRA_NUMBERS,
                 numbers
+            )
+            putStringArrayListExtra(
+                CandidateActivity.EXTRA_NUMBER_DETAILS,
+                numberDetails
             )
             putStringArrayListExtra(
                 CandidateActivity.EXTRA_KEYS,
