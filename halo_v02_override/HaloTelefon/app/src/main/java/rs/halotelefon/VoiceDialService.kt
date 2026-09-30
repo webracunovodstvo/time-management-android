@@ -481,6 +481,15 @@ class VoiceDialService : Service() {
                         continue
                     }
 
+                    // The second ASR pass may actually recognize the command
+                    // better than the command-biased pass. Check it again before
+                    // ever sending it to contact matching.
+                    if (isConfirmation(nameText)) {
+                        AppPrefs.setLastHeard(this, nameText)
+                        confirmSelectedCall()
+                        continue
+                    }
+
                     AppPrefs.setLastHeard(this, nameText)
                     handleName(nameText)
                 }
