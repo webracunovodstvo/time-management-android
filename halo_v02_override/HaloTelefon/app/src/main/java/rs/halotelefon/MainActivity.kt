@@ -191,8 +191,7 @@ class MainActivity : Activity(),
         })
 
         root.addView(TextView(this).apply {
-            text =
-                "v0.14  •  jasni statusi • glasovno OTKAŽI • automatski povratak na Halo telefon"
+            text = "v0.15  •  jedan kontakt = jedna kartica • svi brojevi • mobilni ima prioritet"
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(muted)
