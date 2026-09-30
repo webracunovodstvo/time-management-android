@@ -34,7 +34,8 @@ jobs:
           test -f /tmp/halo-src/HaloTelefon/app/src/main/java/rs/halotelefon/AcousticWakeStore.kt
           test -f /tmp/halo-src/HaloTelefon/app/src/main/java/rs/halotelefon/NameSegmenter.kt
           test -f /tmp/halo-src/HaloTelefon/app/src/main/java/rs/halotelefon/ConfirmationSegmenter.kt
-          grep -q 'versionName = "0.12.0"' /tmp/halo-src/HaloTelefon/app/build.gradle.kts
+          test -f /tmp/halo-src/HaloTelefon/app/src/main/java/rs/halotelefon/SerbianPhonetics.kt
+          grep -q 'versionName = "0.13.0"' /tmp/halo-src/HaloTelefon/app/build.gradle.kts
           grep -q 'ggml-base-q5_1.bin' /tmp/halo-src/HaloTelefon/scripts/setup.sh
 
       - name: Set up Java 17
@@ -71,12 +72,12 @@ jobs:
       - name: Collect APK
         shell: bash
         run: |
-          cp /tmp/halo-src/HaloTelefon/app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/HaloTelefon-v0.12-debug.apk"
-          ls -lh "$GITHUB_WORKSPACE/HaloTelefon-v0.12-debug.apk"
+          cp /tmp/halo-src/HaloTelefon/app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/HaloTelefon-v0.13-debug.apk"
+          ls -lh "$GITHUB_WORKSPACE/HaloTelefon-v0.13-debug.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: HaloTelefon-v0.12-debug-apk
-          path: HaloTelefon-v0.12-debug.apk
+          name: HaloTelefon-v0.13-debug-apk
+          path: HaloTelefon-v0.13-debug.apk
           if-no-files-found: error
