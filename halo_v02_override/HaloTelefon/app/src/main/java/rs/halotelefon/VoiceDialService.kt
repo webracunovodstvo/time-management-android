@@ -466,7 +466,7 @@ class VoiceDialService : Service() {
                     // "zovi" must not be sent straight into contact matching.
                     val commandText = transcribeShort(
                         audio,
-                        "Komanda za potvrdu telefonskog poziva. Dozvoljene reči su: zovi, može, ok, okej, pozovi.",
+                        "zovi, može, ok, okej, pozovi",
                         "komanda"
                     )
 
@@ -555,11 +555,15 @@ class VoiceDialService : Service() {
 
         return words.any { word ->
             when {
-                word == "ok" || word == "okej" || word == "okay" -> true
-                word == "zovi" || word == "pozovi" || word.endsWith("zovi") -> true
-                word == "moze" -> true
+                word == "ok" || word == "okej" || word == "okay" ||
+                    word == "oke" || word == "okey" -> true
+                word == "zovi" || word == "pozovi" ||
+                    word == "zov" || word == "zove" ||
+                    word.endsWith("zovi") -> true
+                word == "moze" || word == "moz" -> true
                 editDistanceAtMostOne(word, "zovi") -> true
                 editDistanceAtMostOne(word, "moze") -> true
+                editDistanceAtMostOne(word, "okej") -> true
                 else -> false
             }
         }
