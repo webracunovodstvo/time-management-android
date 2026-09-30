@@ -302,7 +302,7 @@ class MainActivity : Activity(), SharedPreferences.OnSharedPreferenceChangeListe
         }
 
         root.addView(TextView(this).apply {
-            text = "v0.10  •  Pouzdanija potvrda MOŽE / OK / ZOVI • Android Auto test režim."
+            text = "v0.11  •  Dvostruka provera MOŽE / OK / ZOVI • Android Auto test režim."
             textSize = 12f
             setTextColor(muted)
             gravity = Gravity.CENTER
