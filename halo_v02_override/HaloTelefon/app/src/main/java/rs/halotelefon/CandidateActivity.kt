@@ -23,6 +23,7 @@ class CandidateActivity : Activity(),
         const val EXTRA_SPOKEN = "spoken"
         const val EXTRA_NAMES = "names"
         const val EXTRA_NUMBERS = "numbers"
+        const val EXTRA_NUMBER_DETAILS = "numberDetails"
         const val EXTRA_KEYS = "keys"
         const val EXTRA_USES = "uses"
         const val EXTRA_SCORES = "scores"
@@ -45,6 +46,7 @@ class CandidateActivity : Activity(),
     private var spoken: String = ""
     private var names = arrayListOf<String>()
     private var numbers = arrayListOf<String>()
+    private var numberDetails = arrayListOf<String>()
     private var keys = arrayListOf<String>()
     private var uses = arrayListOf<Int>()
     private var scores = DoubleArray(0)
@@ -136,6 +138,11 @@ class CandidateActivity : Activity(),
         numbers =
             intent.getStringArrayListExtra(
                 EXTRA_NUMBERS
+            ) ?: arrayListOf()
+
+        numberDetails =
+            intent.getStringArrayListExtra(
+                EXTRA_NUMBER_DETAILS
             ) ?: arrayListOf()
 
         keys =
@@ -404,19 +411,6 @@ class CandidateActivity : Activity(),
 
             card.addView(top)
 
-            val digits =
-                number.filter(
-                    Char::isDigit
-                )
-
-            val displayNumber =
-                if (digits.length > 4) {
-                    "••• " +
-                        digits.takeLast(4)
-                } else {
-                    number
-                }
-
             val frequency =
                 if (usage == 0) {
                     "Još nije birano"
@@ -431,8 +425,6 @@ class CandidateActivity : Activity(),
                     text =
                         frequency +
                             "   •   " +
-                            displayNumber +
-                            "   •   " +
                             "%.0f".format(
                                 score * 100
                             ) +
@@ -443,6 +435,51 @@ class CandidateActivity : Activity(),
                     setPadding(
                         dp(60),
                         dp(7),
+                        0,
+                        0
+                    )
+                }
+            )
+
+            val details =
+                numberDetails.getOrNull(index)
+                    ?.takeIf { it.isNotBlank() }
+                    ?: run {
+                        val digits =
+                            number.filter(
+                                Char::isDigit
+                            )
+
+                        val displayNumber =
+                            if (digits.length > 4) {
+                                "••• " +
+                                    digits.takeLast(4)
+                            } else {
+                                number
+                            }
+
+                        "✓ Broj: " +
+                            displayNumber
+                    }
+
+            card.addView(
+                TextView(this).apply {
+                    text = details
+                    textSize = 15f
+                    setTextColor(
+                        if (details.contains("Mobilni")) {
+                            green
+                        } else {
+                            ink
+                        }
+                    )
+                    setTypeface(
+                        typeface,
+                        Typeface.BOLD
+                    )
+                    setPadding(
+                        dp(60),
+                        dp(8),
                         0,
                         0
                     )
