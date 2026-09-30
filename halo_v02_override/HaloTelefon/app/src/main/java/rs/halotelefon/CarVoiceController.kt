@@ -10,6 +10,8 @@ import android.os.Looper
 import androidx.car.app.CarContext
 import androidx.car.app.media.CarAudioRecord
 import com.whispercpp.whisper.WhisperContext
+import java.text.Normalizer
+import java.util.Locale
 import java.util.concurrent.Executors
 
 class CarVoiceController(
@@ -76,16 +78,50 @@ class CarVoiceController(
                     return@execute
                 }
 
-                val text = transcribe(audio)
-                if (text.isBlank()) {
-                    update(state.copy(status = "Nisam razumeo. Pokušaj ponovo.", listening = false))
-                    return@execute
-                }
+                if (state.candidates.isNotEmpty()) {
+                    val commandText = transcribe(
+                        audio,
+                        "Komanda za potvrdu telefonskog poziva. Dozvoljene reči su: zovi, može, ok, okej, pozovi."
+                    )
 
-                if (state.candidates.isNotEmpty() && isConfirmation(text)) {
-                    confirm()
+                    if (isConfirmation(commandText)) {
+                        confirm()
+                        return@execute
+                    }
+
+                    val nameText = transcribe(
+                        audio,
+                        "Ime i prezime osobe iz telefonskog imenika u Srbiji."
+                    )
+
+                    if (nameText.isBlank()) {
+                        update(
+                            state.copy(
+                                status = "Nisam razumeo. Reci MOŽE, OK, ZOVI ili drugo ime.",
+                                listening = false
+                            )
+                        )
+                        return@execute
+                    }
+
+                    rankNewName(nameText)
                 } else {
-                    rankNewName(text)
+                    val nameText = transcribe(
+                        audio,
+                        "Ime i prezime osobe iz telefonskog imenika u Srbiji."
+                    )
+
+                    if (nameText.isBlank()) {
+                        update(
+                            state.copy(
+                                status = "Nisam razumeo. Pokušaj ponovo.",
+                                listening = false
+                            )
+                        )
+                        return@execute
+                    }
+
+                    rankNewName(nameText)
                 }
             } catch (t: Throwable) {
                 update(state.copy(status = "Greška: " + (t.message ?: "nepoznata"), listening = false))
@@ -151,7 +187,7 @@ class CarVoiceController(
         return result
     }
 
-    private fun transcribe(audio: FloatArray): String {
+    private fun transcribe(audio: FloatArray, prompt: String): String {
         val ctx = whisper ?: WhisperContext(
             ModelManager.ensureModel(carContext).absolutePath
         ).also { whisper = it }
@@ -160,12 +196,6 @@ class CarVoiceController(
         val suffix = FloatArray((16_000 * 0.55).toInt())
         val padded = FloatArray(prefix.size + audio.size + suffix.size)
         audio.copyInto(padded, prefix.size)
-
-        val prompt = if (state.candidates.isEmpty()) {
-            "Ime i prezime osobe iz telefonskog imenika u Srbiji."
-        } else {
-            "Kratka komanda: može, ok, zovi. Ili ime i prezime osobe."
-        }
 
         return ctx.transcribe(
             samples = padded,
@@ -176,10 +206,73 @@ class CarVoiceController(
     }
 
     private fun isConfirmation(raw: String): Boolean {
-        val normalized = SerbianNormalizer.normalize(raw)
-        val words = normalized.split(' ').filter { it.isNotBlank() }.toSet()
-        return normalized in setOf("moze", "ok", "zovi") ||
-            words.any { it in setOf("moze", "ok", "zovi") }
+        val normalized = normalizeCommand(raw)
+        if (normalized.isBlank()) return false
+
+        return normalized
+            .split(' ')
+            .filter { it.isNotBlank() }
+            .any { word ->
+                when {
+                    word == "ok" || word == "okej" || word == "okay" -> true
+                    word == "zovi" || word == "pozovi" || word.endsWith("zovi") -> true
+                    word == "moze" -> true
+                    editDistanceAtMostOne(word, "zovi") -> true
+                    editDistanceAtMostOne(word, "moze") -> true
+                    else -> false
+                }
+            }
+    }
+
+    private fun normalizeCommand(raw: String): String {
+        var value = raw
+            .lowercase(Locale.ROOT)
+            .replace("може", "moze")
+            .replace("зови", "zovi")
+            .replace("позови", "pozovi")
+            .replace("океј", "okej")
+            .replace("ок", "ok")
+            .replace('đ', 'd')
+
+        value = Normalizer.normalize(value, Normalizer.Form.NFD)
+            .replace(Regex("\\p{M}+"), "")
+
+        return value
+            .replace(Regex("[^a-z ]+"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+    }
+
+    private fun editDistanceAtMostOne(a: String, b: String): Boolean {
+        if (a == b) return true
+        if (kotlin.math.abs(a.length - b.length) > 1) return false
+
+        var i = 0
+        var j = 0
+        var edits = 0
+
+        while (i < a.length && j < b.length) {
+            if (a[i] == b[j]) {
+                i++
+                j++
+                continue
+            }
+
+            edits++
+            if (edits > 1) return false
+
+            when {
+                a.length > b.length -> i++
+                b.length > a.length -> j++
+                else -> {
+                    i++
+                    j++
+                }
+            }
+        }
+
+        if (i < a.length || j < b.length) edits++
+        return edits <= 1
     }
 
     private fun rankNewName(text: String) {
