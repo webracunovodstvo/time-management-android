@@ -27,6 +27,7 @@ class VoiceDialService : Service() {
         const val ACTION_TRAIN_WAKE = "rs.halotelefon.TRAIN_WAKE"
         const val ACTION_TEST_NAME = "rs.halotelefon.TEST_NAME"
         const val ACTION_SELECT_CANDIDATE = "rs.halotelefon.SELECT_CANDIDATE"
+        const val ACTION_CANCEL_INTERACTION = "rs.halotelefon.CANCEL_INTERACTION"
 
         const val EXTRA_LOOKUP_KEY = "lookupKey"
         const val EXTRA_NAME = "name"
@@ -105,6 +106,15 @@ class VoiceDialService : Service() {
         when (intent?.action) {
             ACTION_STOP -> {
                 stopSelf()
+                return START_NOT_STICKY
+            }
+
+            ACTION_CANCEL_INTERACTION -> {
+                if (running) {
+                    cancelCurrentInteraction("Otkazano.")
+                } else {
+                    stopSelf()
+                }
                 return START_NOT_STICKY
             }
 
@@ -200,11 +210,11 @@ class VoiceDialService : Service() {
                         val ready = acousticWakeStore.isReady()
                         AppPrefs.setStatus(
                             this,
-                            if (ready) "Aktivno. Reci ‘Halo telefon’."
+                            if (ready) "ČEKAM: ‘HALO TELEFON’"
                             else "Prvo nauči ‘Halo telefon’ 5x."
                         )
                         updateServiceNotification(
-                            if (ready) "Slušam: ‘Halo telefon’"
+                            if (ready) "ČEKAM: ‘HALO TELEFON’"
                             else "Čeka trening wake fraze"
                         )
                     }
@@ -323,7 +333,7 @@ class VoiceDialService : Service() {
                         val segment = nameSegmenter.accept(frame)
 
                         if (!wasSpeaking && nameSegmenter.speechStarted) {
-                            AppPrefs.setStatus(this, "Čujem ime…")
+                            AppPrefs.setStatus(this, "SLUŠAM IME…")
                             updateServiceNotification("Čujem ime kontakta…")
                         }
 
@@ -336,20 +346,20 @@ class VoiceDialService : Service() {
 
                             AppPrefs.setStatus(
                                 this,
-                                "Nisam čuo ime. Reci ponovo ‘Halo telefon’."
+                                "Nisam čuo ime. ČEKAM: ‘HALO TELEFON’"
                             )
                             AppPrefs.setNameDebug(
                                 this,
                                 "Timeout: govor nije detektovan u 5 s"
                             )
-                            updateServiceNotification("Slušam: ‘Halo telefon’")
+                            updateServiceNotification("ČEKAM: ‘HALO TELEFON’")
                             beepError()
                             continue
                         }
 
                         if (segment != null && segment.size >= 8_000) {
                             nameInferencePending = true
-                            AppPrefs.setStatus(this, "Prepoznajem ime…")
+                            AppPrefs.setStatus(this, "PREPOZNAJEM IME…")
                             AppPrefs.setNameDebug(
                                 this,
                                 "Snimljeno ime, pokrećem lokalni Whisper…"
@@ -382,11 +392,8 @@ class VoiceDialService : Service() {
 
                         if (confirmationSegmenter.timedOut) {
                             confirmationSegmenter.reset()
-                            AppPrefs.setStatus(
-                                this,
-                                "Čekam: ‘može’, ‘ok’, ‘okej’, ‘zovi’ ili drugo ime."
-                            )
-                            updateServiceNotification("Čekam potvrdu ili novo ime")
+                            cancelCurrentInteraction("Istekao izbor.")
+                            observedMode = mode
                             continue
                         }
 
@@ -446,7 +453,7 @@ class VoiceDialService : Service() {
                         mode = Mode.WAIT_WAKE
                         AppPrefs.setStatus(
                             this,
-                            "Nisam razumeo ime. Reci ponovo ‘Halo telefon’."
+                            "Nisam razumeo ime. ČEKAM: ‘HALO TELEFON’"
                         )
                         updateServiceNotification("Slušam: ‘Halo telefon’")
                         beepError()
@@ -465,9 +472,16 @@ class VoiceDialService : Service() {
                     // "zovi" must not be sent straight into contact matching.
                     val commandText = transcribeShort(
                         audio,
-                        "zovi, može, ok, okej, pozovi",
+                        "zovi, može, ok, okej, pozovi, otkaži",
                         "komanda"
                     )
+
+                    if (isCancelCommand(commandText)) {
+                        nameInferencePending = false
+                        AppPrefs.setLastHeard(this, commandText)
+                        cancelCurrentInteraction("Otkazano glasom.")
+                        continue
+                    }
 
                     if (isConfirmation(commandText)) {
                         nameInferencePending = false
@@ -487,6 +501,18 @@ class VoiceDialService : Service() {
                             "Nisam razumeo. Reci ‘može’, ‘ok’, ‘zovi’ ili drugo ime."
                         )
                         beepError()
+                        continue
+                    }
+
+                    val cancelFromFallback =
+                        nameForms.firstOrNull { isCancelCommand(it) }
+
+                    if (cancelFromFallback != null) {
+                        AppPrefs.setLastHeard(
+                            this,
+                            cancelFromFallback
+                        )
+                        cancelCurrentInteraction("Otkazano glasom.")
                         continue
                     }
 
@@ -546,6 +572,25 @@ class VoiceDialService : Service() {
         return text
     }
 
+    private fun isCancelCommand(raw: String): Boolean {
+        val normalized = normalizeCommand(raw)
+        if (normalized.isBlank()) return false
+
+        return normalized
+            .split(' ')
+            .filter { it.isNotBlank() }
+            .any { word ->
+                word in setOf(
+                    "otkazi",
+                    "otkazi",
+                    "odustani",
+                    "ponisti",
+                    "prekini"
+                ) ||
+                    editDistanceAtMostOne(word, "otkazi")
+            }
+    }
+
     private fun isConfirmation(raw: String): Boolean {
         val normalized = normalizeCommand(raw)
         if (normalized.isBlank()) return false
@@ -578,6 +623,10 @@ class VoiceDialService : Service() {
             .replace("позови", "pozovi")
             .replace("океј", "okej")
             .replace("ок", "ok")
+            .replace("откажи", "otkazi")
+            .replace("одустани", "odustani")
+            .replace("поништи", "ponisti")
+            .replace("прекини", "prekini")
             .replace('đ', 'd')
             .replace('Đ', 'd')
 
@@ -620,6 +669,29 @@ class VoiceDialService : Service() {
 
         if (i < a.length || j < b.length) edits++
         return edits <= 1
+    }
+
+    private fun cancelCurrentInteraction(reason: String) {
+        selectedContact = null
+        selectedSpoken = ""
+        nameInferencePending = false
+        segmentQueue.clear()
+        mode = Mode.WAIT_WAKE
+
+        sendBroadcast(
+            Intent(CandidateActivity.ACTION_CLOSE_PICKER)
+                .setPackage(packageName)
+        )
+
+        getSystemService(NotificationManager::class.java)
+            .cancel(CANDIDATE_NOTIFICATION_ID)
+
+        AppPrefs.setStatus(
+            this,
+            reason + " ČEKAM: ‘HALO TELEFON’"
+        )
+        updateServiceNotification("ČEKAM: ‘HALO TELEFON’")
+        beepReady()
     }
 
     private fun confirmSelectedCall() {
@@ -714,14 +786,14 @@ class VoiceDialService : Service() {
 
         AppPrefs.setStatus(
             this,
-            "Prepoznato ‘Halo telefon’. Posle tona reci ime."
+            "RECI IME"
         )
         AppPrefs.setNameDebug(
             this,
             "Čekam ime nakon wake fraze"
         )
         updateServiceNotification(
-            "Posle tona reci ime kontakta"
+            "RECI IME"
         )
         beepReady()
     }
@@ -782,7 +854,7 @@ class VoiceDialService : Service() {
             return
         }
 
-        AppPrefs.setStatus(this, "Tražim kontakt…")
+        AppPrefs.setStatus(this, "TRAŽIM KONTAKT…")
 
         val contacts = getContacts()
         val ranked = ContactMatcher(learningStore)
@@ -855,12 +927,12 @@ class VoiceDialService : Service() {
 
         AppPrefs.setStatus(
             this,
-            "Označen: " + selected.contact.displayName +
-                ". Reci ‘može’, ‘ok’, ‘zovi’ ili izgovori drugo ime."
+            "OZNAČEN: " + selected.contact.displayName +
+                " • RECI ZOVI / MOŽE / OK, DRUGO IME ILI OTKAŽI"
         )
 
         updateServiceNotification(
-            "Čekam potvrdu ili drugo ime"
+            "ZOVI / MOŽE / OK • DRUGO IME • OTKAŽI"
         )
 
         showCandidatePicker(
