@@ -89,12 +89,9 @@ class CarVoiceController(
                         return@execute
                     }
 
-                    val nameText = transcribe(
-                        audio,
-                        "Ime i prezime osobe iz telefonskog imenika u Srbiji."
-                    )
+                    val nameForms = recognizeNameForms(audio)
 
-                    if (nameText.isBlank()) {
+                    if (nameForms.isEmpty()) {
                         update(
                             state.copy(
                                 status = "Nisam razumeo. Reci MOŽE, OK, ZOVI ili drugo ime.",
@@ -104,19 +101,16 @@ class CarVoiceController(
                         return@execute
                     }
 
-                    if (isConfirmation(nameText)) {
+                    if (nameForms.any { isConfirmation(it) }) {
                         confirm()
                         return@execute
                     }
 
-                    rankNewName(nameText)
+                    rankNewName(nameForms)
                 } else {
-                    val nameText = transcribe(
-                        audio,
-                        "Ime i prezime osobe iz telefonskog imenika u Srbiji."
-                    )
+                    val nameForms = recognizeNameForms(audio)
 
-                    if (nameText.isBlank()) {
+                    if (nameForms.isEmpty()) {
                         update(
                             state.copy(
                                 status = "Nisam razumeo. Pokušaj ponovo.",
@@ -126,7 +120,7 @@ class CarVoiceController(
                         return@execute
                     }
 
-                    rankNewName(nameText)
+                    rankNewName(nameForms)
                 }
             } catch (t: Throwable) {
                 update(state.copy(status = "Greška: " + (t.message ?: "nepoznata"), listening = false))
@@ -223,6 +217,106 @@ class CarVoiceController(
         ).trim()
     }
 
+    private fun recognizeNameForms(
+        audio: FloatArray
+    ): List<String> {
+        val contacts =
+            ContactRepository(carContext.contentResolver).load()
+        val forms = ArrayList<String>(2)
+
+        val primary = transcribe(
+            audio,
+            "Ime i prezime osobe iz telefonskog imenika u Srbiji."
+        ).trim()
+
+        if (primary.isNotBlank()) {
+            forms.add(primary)
+        }
+
+        val primaryScore = if (primary.isBlank()) {
+            0.0
+        } else {
+            ContactMatcher(learningStore)
+                .rank(primary, contacts, 1)
+                .firstOrNull()
+                ?.score ?: 0.0
+        }
+
+        val shortAudio =
+            audio.size.toDouble() / 16_000.0 <= 1.35
+
+        if (
+            shortAudio ||
+            primary.isBlank() ||
+            primaryScore < 0.78
+        ) {
+            val contactAware = transcribe(
+                audio,
+                buildShortNamePrompt(contacts)
+            ).trim()
+
+            if (
+                contactAware.isNotBlank() &&
+                contactAware !in forms
+            ) {
+                forms.add(contactAware)
+            }
+        }
+
+        return forms
+    }
+
+    private fun buildShortNamePrompt(
+        contacts: List<ContactPhone>
+    ): String {
+        val orderedContacts = contacts.sortedWith(
+            compareByDescending<ContactPhone> {
+                learningStore.totalUses(it.lookupKey)
+            }.thenBy {
+                it.displayName.length
+            }
+        )
+
+        val tokens = LinkedHashSet<String>()
+
+        for (contact in orderedContacts) {
+            val clean = contact.displayName
+                .replace(
+                    Regex("[#@()\\[\\]{}.,;:_/\\\\|-]+"),
+                    " "
+                )
+                .replace(Regex("\\s+"), " ")
+                .trim()
+
+            for (token in clean.split(' ')) {
+                val candidate = token.trim()
+                if (candidate.length in 2..12) {
+                    val key =
+                        SerbianNormalizer.normalize(candidate)
+                    if (key.isNotBlank()) {
+                        tokens.add(candidate)
+                    }
+                }
+            }
+        }
+
+        val prefix =
+            "Moguća imena kontakata. Izgovor je na srpskom: "
+        val builder = StringBuilder(prefix)
+
+        for (token in tokens) {
+            if (builder.length + token.length + 2 > 1600) {
+                break
+            }
+            if (builder.length > prefix.length) {
+                builder.append(", ")
+            }
+            builder.append(token)
+        }
+
+        return builder.toString()
+    }
+
     private fun isConfirmation(raw: String): Boolean {
         val normalized = normalizeCommand(raw)
         if (normalized.isBlank()) return false
@@ -295,16 +389,21 @@ class CarVoiceController(
         return edits <= 1
     }
 
-    private fun rankNewName(text: String) {
+    private fun rankNewName(formsRaw: List<String>) {
+        val forms = formsRaw
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+
         val contacts = ContactRepository(carContext.contentResolver).load()
-        val ranked = ContactMatcher(learningStore).rank(text, contacts, 30)
+        val ranked = ContactMatcher(learningStore).rankBestOf(forms, contacts, 30)
         val best = ranked.firstOrNull()
 
         if (best == null || best.score < 0.58) {
             update(
                 State(
-                    status = "Nisam našao kontakt za: " + text,
-                    spoken = text
+                    status = "Nisam našao kontakt za: " + forms.joinToString(" / "),
+                    spoken = forms.joinToString(" / ")
                 )
             )
             return
@@ -355,7 +454,7 @@ class CarVoiceController(
             State(
                 status = "Označen: " + candidates[selectedIndex].name +
                     ". Dodirni mikrofon i reci MOŽE, OK ili ZOVI. Za drugi kontakt izgovori drugo ime.",
-                spoken = text,
+                spoken = forms.firstOrNull().orEmpty(),
                 candidates = candidates,
                 selectedIndex = selectedIndex,
                 listening = false
