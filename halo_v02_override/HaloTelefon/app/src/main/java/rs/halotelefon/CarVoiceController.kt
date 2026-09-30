@@ -81,7 +81,7 @@ class CarVoiceController(
                 if (state.candidates.isNotEmpty()) {
                     val commandText = transcribe(
                         audio,
-                        "Komanda za potvrdu telefonskog poziva. Dozvoljene reči su: zovi, može, ok, okej, pozovi."
+                        "zovi, može, ok, okej, pozovi"
                     )
 
                     if (isConfirmation(commandText)) {
@@ -146,7 +146,9 @@ class CarVoiceController(
             .setUsage(AudioAttributes.USAGE_ASSISTANCE_NAVIGATION_GUIDANCE)
             .build()
 
-        val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+        val focus = AudioFocusRequest.Builder(
+            AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE
+        )
             .setAudioAttributes(attributes)
             .setOnAudioFocusChangeListener { change ->
                 if (change == AudioManager.AUDIOFOCUS_LOSS) {
@@ -155,34 +157,45 @@ class CarVoiceController(
             }
             .build()
 
-        if (manager.requestAudioFocus(focus) != AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+        if (
+            manager.requestAudioFocus(focus) !=
+            AudioManager.AUDIOFOCUS_REQUEST_GRANTED
+        ) {
             return null
         }
 
-        val segmenter = NameSegmenter()
+        val commandMode = state.candidates.isNotEmpty()
+        val nameSegmenter = NameSegmenter()
+        val confirmationSegmenter = ConfirmationSegmenter()
         val bytes = ByteArray(CarAudioRecord.AUDIO_CONTENT_BUFFER_SIZE)
         var result: FloatArray? = null
 
         try {
             record.startRecording()
+
             while (true) {
                 val count = record.read(bytes, 0, bytes.size)
                 if (count <= 0) break
 
-                // CarAudioRecord exposes audio/l16: signed 16-bit PCM at 16 kHz.
                 val samples = FloatArray(count / 2)
                 var p = 0
-                var s = 0
+                var sampleIndex = 0
+
                 while (p + 1 < count) {
                     val hi = bytes[p].toInt() and 0xff
                     val lo = bytes[p + 1].toInt() and 0xff
                     val value = ((hi shl 8) or lo).toShort()
-                    samples[s++] = value / 32768f
+                    samples[sampleIndex++] = value / 32768f
                     p += 2
                 }
 
-                result = segmenter.accept(samples)
-                if (result != null || segmenter.timedOut) break
+                if (commandMode) {
+                    result = confirmationSegmenter.accept(samples)
+                    if (result != null || confirmationSegmenter.timedOut) break
+                } else {
+                    result = nameSegmenter.accept(samples)
+                    if (result != null || nameSegmenter.timedOut) break
+                }
             }
         } finally {
             runCatching { record.stopRecording() }
