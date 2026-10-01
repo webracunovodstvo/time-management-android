@@ -191,7 +191,7 @@ class MainActivity : Activity(),
         })
 
         root.addView(TextView(this).apply {
-            text = "v0.17  •  stabilan Halo telefon → ime prelaz • brži imenik • mobilni prioritet"
+            text = "v0.18  •  zaključana potvrda • manje lažnih zvukova • brže ime"
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(muted)
