@@ -54,10 +54,10 @@ class NameSegmenter(
             preRoll.addLast(frame.copyOf())
             while (preRoll.size > 12) preRoll.removeFirst() // ~240 ms
 
-            val startThreshold = max(0.0030, noiseFloor * 1.35)
+            val startThreshold = max(0.0045, noiseFloor * 1.65)
             if (rms > startThreshold) speechFrames++ else speechFrames = 0
 
-            if (speechFrames >= 2) {
+            if (speechFrames >= 3) {
                 speechStarted = true
                 preRoll.forEach { f -> f.forEach(segment::add) }
                 preRoll.clear()
