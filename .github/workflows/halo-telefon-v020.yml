@@ -15,7 +15,7 @@ jobs:
       - name: Restore Halo Telefon source
         run: |
           mkdir -p build-halo
-          cat halo-telefon-v020/part-* | base64 -d | tar -xz -C build-halo
+          base64 -d halo-telefon-v020/source.tar.gz.b64 | tar -xz -C build-halo
 
       - uses: actions/setup-java@v4
         with:
