@@ -185,9 +185,8 @@ class VoiceDialService : Service() {
 
         inferenceExecutor.execute {
             try {
-                val model = ModelManager.ensureModel(this)
-                whisper = WhisperContext(model.absolutePath)
-                contactCache = loadContactsSafely()
+                // Wake training must react immediately. Audio starts before
+                // loading the large Whisper model or scanning contacts.
                 initRecorder()
 
                 when (mode) {
@@ -229,6 +228,11 @@ class VoiceDialService : Service() {
                 ) {
                     beepReady()
                 }
+
+                // Heavy resources load only after the microphone is already live.
+                val model = ModelManager.ensureModel(this)
+                whisper = WhisperContext(model.absolutePath)
+                contactCache = loadContactsSafely()
 
                 startInferenceLoop()
             } catch (t: Throwable) {
@@ -286,6 +290,7 @@ class VoiceDialService : Service() {
         audioExecutor.execute {
             val frameShort = ShortArray(320)
             val wakeSegmenter = VoiceSegmenter()
+            val trainingSegmenter = WakeTrainingSegmenter()
             val nameSegmenter = NameSegmenter()
             val confirmationSegmenter = ConfirmationSegmenter()
             var observedMode = mode
@@ -309,6 +314,7 @@ class VoiceDialService : Service() {
 
                 if (currentMode != observedMode) {
                     wakeSegmenter.reset()
+                    trainingSegmenter.reset()
                     nameSegmenter.reset()
                     confirmationSegmenter.reset()
                     observedMode = currentMode
@@ -316,6 +322,7 @@ class VoiceDialService : Service() {
 
                 if (SystemClock.elapsedRealtime() < ignoreAudioUntilMs) {
                     wakeSegmenter.reset()
+                    trainingSegmenter.reset()
                     nameSegmenter.reset()
                     confirmationSegmenter.reset()
                     continue
@@ -419,11 +426,50 @@ class VoiceDialService : Service() {
                         }
                     }
 
-                    Mode.WAIT_WAKE,
                     Mode.TRAIN_WAKE -> {
-                        val segment = wakeSegmenter.accept(frame, 3.0)
+                        val wasSpeaking =
+                            trainingSegmenter.speechStarted
 
-                        if (segment != null && segment.size >= 4_800) {
+                        val segment =
+                            trainingSegmenter.accept(
+                                frame,
+                                3.0
+                            )
+
+                        if (
+                            !wasSpeaking &&
+                            trainingSegmenter.speechStarted
+                        ) {
+                            AppPrefs.setStatus(
+                                this,
+                                "ČUJEM ‘HALO TELEFON’…"
+                            )
+                            updateServiceNotification(
+                                "Snimam wake frazu…"
+                            )
+                        }
+
+                        if (
+                            segment != null &&
+                            segment.size >= 4_800
+                        ) {
+                            // Training does not need Whisper. Process immediately
+                            // so contact/model loading cannot block the 5 samples.
+                            handleWakeTraining(segment)
+                        }
+                    }
+
+                    Mode.WAIT_WAKE -> {
+                        val segment =
+                            wakeSegmenter.accept(
+                                frame,
+                                3.0
+                            )
+
+                        if (
+                            segment != null &&
+                            segment.size >= 4_800
+                        ) {
                             segmentQueue.offer(segment)
                         }
                     }
@@ -439,7 +485,11 @@ class VoiceDialService : Service() {
             when (mode) {
                 Mode.WAIT_WAKE -> handleWake(audio)
 
-                Mode.TRAIN_WAKE -> handleWakeTraining(audio)
+                Mode.TRAIN_WAKE -> {
+                    // Training samples are handled immediately on the audio
+                    // thread. Ignore any stale queued segment.
+                    continue
+                }
 
                 Mode.WAIT_NAME -> {
                     val forms = recognizeNameForms(audio)
@@ -834,8 +884,12 @@ class VoiceDialService : Service() {
         } else {
             AppPrefs.setStatus(
                 this,
-                "Snimljeno " + count +
-                    "/5. Reci ‘Halo telefon’ ponovo."
+                "SNIMLJENO " + count +
+                    "/5 • RECI ‘HALO TELEFON’ PONOVO"
+            )
+            updateServiceNotification(
+                "Wake trening " + count +
+                    "/5 • reci ponovo ‘Halo telefon’"
             )
             beepReady()
         }
