@@ -664,13 +664,40 @@ class VoiceDialService : Service() {
             when (mode) {
                 Mode.WAIT_WAKE -> handleWake(audio)
 
-                Mode.TRAIN_WAKE -> {
+                Mode.TRAIN_WAKE,
+                Mode.TRAIN_COMMANDS -> {
                     // Training samples are handled immediately on the audio
                     // thread. Ignore any stale queued segment.
                     continue
                 }
 
                 Mode.WAIT_NAME -> {
+                    val learnedCancel =
+                        runCatching {
+                            acousticCommandStore.match(
+                                audio,
+                                setOf(
+                                    LearnedVoiceCommand.CANCEL
+                                )
+                            )
+                        }.getOrNull()
+
+                    if (
+                        learnedCancel?.matched == true &&
+                        learnedCancel.command ==
+                        LearnedVoiceCommand.CANCEL
+                    ) {
+                        nameInferencePending = false
+                        AppPrefs.setLastHeard(
+                            this,
+                            "Naučeno: OTKAŽI"
+                        )
+                        cancelCurrentInteraction(
+                            "Otkazano glasom."
+                        )
+                        continue
+                    }
+
                     val forms = recognizeNameForms(audio)
                     nameInferencePending = false
 
@@ -713,60 +740,324 @@ class VoiceDialService : Service() {
                     handleNameForms(forms)
                 }
 
+                Mode.WAIT_SELECT,
                 Mode.WAIT_CONFIRM -> {
-                    // IMPORTANT: command recognition comes first. "Otkaži"
-                    // must never be mistaken for the acoustic wake phrase.
-                    val commandText = transcribeShort(
-                        audio,
-                        "Komanda: zovi, može, ok, okej, pozovi, otkaži, odustani, prekini, halo telefon.",
-                        "komanda"
-                    )
-                    nameInferencePending = false
-
-                    if (isCancelCommand(commandText)) {
-                        AppPrefs.setLastHeard(this, commandText)
-                        cancelCurrentInteraction("Otkazano glasom.")
-                        continue
-                    }
-
-                    if (isConfirmation(commandText)) {
-                        AppPrefs.setLastHeard(this, commandText)
-                        confirmSelectedCall()
-                        continue
-                    }
-
-                    // A new contact is allowed only after BOTH textual and
-                    // acoustic evidence for "Halo telefon".
-                    if (isWakeCommand(commandText)) {
-                        val wake = runCatching {
-                            acousticWakeStore.match(audio)
-                        }.getOrNull()
-
-                        if (wake?.matched == true) {
-                            AppPrefs.setLastHeard(this, commandText)
-                            beginFreshNameAfterWake()
-                            continue
-                        }
-                    }
-
-                    // Unknown sounds/words are intentionally ignored.
-                    AppPrefs.setNameDebug(
-                        this,
-                        "Ignorisano u potvrdi: " +
-                            if (commandText.isBlank()) "(bez teksta)"
-                            else commandText
-                    )
-                    AppPrefs.setStatus(
-                        this,
-                        "Čekam ZOVI / MOŽE / OK / OTKAŽI. Za novi kontakt reci ‘HALO TELEFON’."
-                    )
-                    updateServiceNotification(
-                        "Čekam potvrdu • HALO TELEFON = novo ime"
-                    )
+                    handleInteractionCommand(audio)
                 }
             }
         }
     }
+
+    private fun handleInteractionCommand(
+        audio: FloatArray
+    ) {
+        nameInferencePending = false
+
+        val allowed =
+            buildSet {
+                add(
+                    LearnedVoiceCommand.CANCEL
+                )
+
+                if (pendingCandidates.isNotEmpty()) {
+                    LearnedVoiceCommand.values()
+                        .filter {
+                            it.candidateIndex != null &&
+                                it.candidateIndex <
+                                pendingCandidates.size
+                        }
+                        .forEach(::add)
+                }
+            }
+
+        val learned =
+            runCatching {
+                acousticCommandStore.match(
+                    audio,
+                    allowed
+                )
+            }.getOrNull()
+
+        if (learned?.matched == true) {
+            when (val command = learned.command) {
+                LearnedVoiceCommand.CANCEL -> {
+                    AppPrefs.setLastHeard(
+                        this,
+                        "Naučeno: OTKAŽI"
+                    )
+                    cancelCurrentInteraction(
+                        "Otkazano glasom."
+                    )
+                    return
+                }
+
+                null -> Unit
+
+                else -> {
+                    val index =
+                        command.candidateIndex
+
+                    if (
+                        index != null &&
+                        index <
+                        pendingCandidates.size
+                    ) {
+                        AppPrefs.setLastHeard(
+                            this,
+                            "Naučeno: " +
+                                command.spokenLabel
+                        )
+                        selectCandidateByVoice(
+                            index
+                        )
+                        return
+                    }
+                }
+            }
+        }
+
+        val commandText =
+            transcribeShort(
+                audio,
+                "Komanda: prvi, drugi, treći, četvrti, peti, zovi, može, ok, okej, pozovi, otkaži, odustani, prekini, halo telefon.",
+                "komanda"
+            )
+
+        if (isCancelCommand(commandText)) {
+            AppPrefs.setLastHeard(
+                this,
+                commandText
+            )
+            cancelCurrentInteraction(
+                "Otkazano glasom."
+            )
+            return
+        }
+
+        val ordinal =
+            ordinalIndex(commandText)
+
+        if (
+            ordinal != null &&
+            ordinal <
+            pendingCandidates.size
+        ) {
+            AppPrefs.setLastHeard(
+                this,
+                commandText
+            )
+            selectCandidateByVoice(
+                ordinal
+            )
+            return
+        }
+
+        if (isConfirmation(commandText)) {
+            AppPrefs.setLastHeard(
+                this,
+                commandText
+            )
+            confirmSelectedCall()
+            return
+        }
+
+        if (isWakeCommand(commandText)) {
+            val wake =
+                runCatching {
+                    acousticWakeStore.match(
+                        audio
+                    )
+                }.getOrNull()
+
+            if (wake?.matched == true) {
+                AppPrefs.setLastHeard(
+                    this,
+                    commandText
+                )
+                beginFreshNameAfterWake()
+                return
+            }
+        }
+
+        AppPrefs.setNameDebug(
+            this,
+            "Ignorisano u komandama: " +
+                if (commandText.isBlank()) {
+                    "(bez teksta)"
+                } else {
+                    commandText
+                }
+        )
+
+        AppPrefs.setStatus(
+            this,
+            if (mode == Mode.WAIT_SELECT) {
+                selectionStatus()
+            } else {
+                confirmationStatus()
+            }
+        )
+
+        updateServiceNotification(
+            if (mode == Mode.WAIT_SELECT) {
+                "Izaberi broj kontakta glasom"
+            } else {
+                "Čekam potvrdu • HALO TELEFON = novo ime"
+            }
+        )
+    }
+
+    private fun selectCandidateByVoice(
+        index: Int
+    ) {
+        val candidate =
+            pendingCandidates.getOrNull(index)
+
+        if (candidate == null) {
+            AppPrefs.setStatus(
+                this,
+                selectionStatus()
+            )
+            beepError()
+            return
+        }
+
+        selectedContact =
+            candidate.contact
+        mode = Mode.WAIT_CONFIRM
+        segmentQueue.clear()
+
+        AppPrefs.setLastMatch(
+            this,
+            "Glasom izabrano: " +
+                candidate.contact.displayName
+        )
+        AppPrefs.setStatus(
+            this,
+            "Izabrano: " +
+                candidate.contact.displayName +
+                ". Reci ZOVI / MOŽE / OK / OTKAŽI."
+        )
+        updateServiceNotification(
+            "ZOVI / MOŽE / OK / OTKAŽI"
+        )
+
+        sendBroadcast(
+            Intent(
+                CandidateActivity.ACTION_VOICE_SELECTION
+            )
+                .setPackage(packageName)
+                .putExtra(
+                    CandidateActivity.EXTRA_VOICE_INDEX,
+                    index
+                )
+        )
+
+        beepReady()
+    }
+
+    private fun ordinalIndex(
+        raw: String
+    ): Int? {
+        val normalized =
+            normalizeCommand(raw)
+
+        val words =
+            normalized
+                .split(' ')
+                .filter { it.isNotBlank() }
+
+        for (word in words) {
+            when {
+                word in setOf(
+                    "prvi",
+                    "prva",
+                    "prvo",
+                    "jedan"
+                ) ||
+                    editDistanceAtMostOne(
+                        word,
+                        "prvi"
+                    ) ->
+                    return 0
+
+                word in setOf(
+                    "drugi",
+                    "druga",
+                    "drugo",
+                    "dva"
+                ) ||
+                    editDistanceAtMostOne(
+                        word,
+                        "drugi"
+                    ) ->
+                    return 1
+
+                word in setOf(
+                    "treci",
+                    "treca",
+                    "trece",
+                    "tri"
+                ) ||
+                    editDistanceAtMostOne(
+                        word,
+                        "treci"
+                    ) ->
+                    return 2
+
+                word in setOf(
+                    "cetvrti",
+                    "cetvrta",
+                    "cetvrto",
+                    "cetiri"
+                ) ||
+                    editDistanceAtMostOne(
+                        word,
+                        "cetvrti"
+                    ) ->
+                    return 3
+
+                word in setOf(
+                    "peti",
+                    "peta",
+                    "peto",
+                    "pet"
+                ) ||
+                    editDistanceAtMostOne(
+                        word,
+                        "peti"
+                    ) ->
+                    return 4
+            }
+        }
+
+        return null
+    }
+
+    private fun selectionStatus(): String {
+        val labels =
+            LearnedVoiceCommand.values()
+                .filter {
+                    it.candidateIndex != null &&
+                        it.candidateIndex <
+                        pendingCandidates.size
+                }
+                .joinToString(" / ") {
+                    it.spokenLabel
+                }
+
+        return if (labels.isBlank()) {
+            confirmationStatus()
+        } else {
+            "IZABERI: " +
+                labels +
+                " • OTKAŽI"
+        }
+    }
+
+    private fun confirmationStatus(): String =
+        "Čekam ZOVI / MOŽE / OK / OTKAŽI. " +
+            "Za novi kontakt reci ‘HALO TELEFON’."
 
     private fun transcribeShort(
         audio: FloatArray,
