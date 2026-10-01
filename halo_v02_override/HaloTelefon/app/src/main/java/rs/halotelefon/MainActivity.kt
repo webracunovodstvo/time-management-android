@@ -191,7 +191,7 @@ class MainActivity : Activity(),
         })
 
         root.addView(TextView(this).apply {
-            text = "v0.15  •  jedan kontakt = jedna kartica • svi brojevi • mobilni ima prioritet"
+            text = "v0.16  •  instant wake trening • kontakti sa više brojeva • mobilni prioritet"
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(muted)
