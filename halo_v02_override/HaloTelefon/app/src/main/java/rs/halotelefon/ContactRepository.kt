@@ -248,38 +248,52 @@ class ContactRepository(
     ): List<ContactPhone> {
         val result = ArrayList<ContactPhone>()
 
+        // O(total phone numbers) index instead of comparing every contact
+        // against every previous contact.
+        val ownerByNameAndNumber =
+            HashMap<String, Int>()
+
         for (contact in contacts) {
             val normalizedName =
                 SerbianNormalizer.normalize(
                     contact.displayName
                 )
 
-            val contactNumbers =
+            val normalizedNumbers =
                 contact.numbersForDisplay()
                     .map {
                         normalizeNumber(it.number)
                     }
-                    .toSet()
+                    .filter { it.isNotBlank() }
+                    .distinct()
 
-            val index =
-                result.indexOfFirst { existing ->
-                    SerbianNormalizer.normalize(
-                        existing.displayName
-                    ) == normalizedName &&
-                        existing.numbersForDisplay()
-                            .any {
-                                normalizeNumber(it.number) in
-                                    contactNumbers
-                            }
+            val existingIndex =
+                normalizedNumbers
+                    .firstNotNullOfOrNull { number ->
+                        ownerByNameAndNumber[
+                            normalizedName +
+                                "|" +
+                                number
+                        ]
+                    }
+
+            if (existingIndex == null) {
+                val newIndex = result.size
+                result += contact
+
+                for (number in normalizedNumbers) {
+                    ownerByNameAndNumber[
+                        normalizedName +
+                            "|" +
+                            number
+                    ] = newIndex
                 }
 
-            if (index < 0) {
-                result += contact
                 continue
             }
 
             val existing =
-                result[index]
+                result[existingIndex]
 
             val merged =
                 (
@@ -297,7 +311,7 @@ class ContactRepository(
                         }
                     )
 
-            result[index] =
+            result[existingIndex] =
                 existing.copy(
                     number =
                         merged.firstOrNull()
@@ -305,6 +319,21 @@ class ContactRepository(
                             ?: existing.number,
                     allNumbers = merged
                 )
+
+            for (item in merged) {
+                val number =
+                    normalizeNumber(
+                        item.number
+                    )
+
+                if (number.isNotBlank()) {
+                    ownerByNameAndNumber[
+                        normalizedName +
+                            "|" +
+                            number
+                    ] = existingIndex
+                }
+            }
         }
 
         return result
