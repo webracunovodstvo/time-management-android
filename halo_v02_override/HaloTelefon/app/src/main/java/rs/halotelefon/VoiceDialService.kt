@@ -57,6 +57,7 @@ class VoiceDialService : Service() {
 
     private val audioExecutor = Executors.newSingleThreadExecutor()
     private val inferenceExecutor = Executors.newSingleThreadExecutor()
+    private val contactExecutor = Executors.newSingleThreadExecutor()
     private val segmentQueue = ArrayBlockingQueue<FloatArray>(3)
 
     private lateinit var recorder: AudioRecord
@@ -64,7 +65,7 @@ class VoiceDialService : Service() {
     private lateinit var acousticWakeStore: AcousticWakeStore
     private lateinit var learningStore: LearningStore
 
-    private var contactCache: List<ContactPhone>? = null
+    @Volatile private var contactCache: List<ContactPhone>? = null
     private var tone: ToneGenerator? = null
     private var noiseSuppressor: NoiseSuppressor? = null
     private var automaticGainControl: AutomaticGainControl? = null
@@ -155,9 +156,12 @@ class VoiceDialService : Service() {
                     segmentQueue.clear()
                     AppPrefs.setStatus(
                         this,
-                        "Izabrano: " + name + ". Reci ‘može’, ‘ok’ ili ‘zovi’."
+                        "Izabrano: " + name +
+                            ". Reci ZOVI / MOŽE / OK / OTKAŽI ili ponovo ‘HALO TELEFON’."
                     )
-                    updateServiceNotification("Čekam potvrdu: može / ok / zovi")
+                    updateServiceNotification(
+                        "ZOVI / MOŽE / OK / OTKAŽI • HALO TELEFON = novo ime"
+                    )
                     if (running) beepReady()
                 }
             }
@@ -204,8 +208,13 @@ class VoiceDialService : Service() {
                     }
 
                     Mode.WAIT_CONFIRM -> {
-                        AppPrefs.setStatus(this, "Reci ‘može’, ‘ok’, ‘zovi’ ili drugo ime.")
-                        updateServiceNotification("Čekam potvrdu ili novo ime")
+                        AppPrefs.setStatus(
+                            this,
+                            "Čekam ZOVI / MOŽE / OK / OTKAŽI. Za novi kontakt reci ‘HALO TELEFON’."
+                        )
+                        updateServiceNotification(
+                            "Čekam potvrdu • HALO TELEFON = novo ime"
+                        )
                     }
 
                     Mode.WAIT_WAKE -> {
@@ -236,8 +245,17 @@ class VoiceDialService : Service() {
                 val model = ModelManager.ensureModel(this)
                 whisper = WhisperContext(model.absolutePath)
 
-                // Contact loading is lazy and optimized; do not block wake/name
-                // state transitions before the inference loop starts.
+                // Warm the grouped phonebook in parallel. Wake recognition
+                // remains independent, but the first real name lookup is faster.
+                contactExecutor.execute {
+                    runCatching {
+                        val loaded = loadContactsSafely()
+                        if (loaded.isNotEmpty()) {
+                            contactCache = loaded
+                        }
+                    }
+                }
+
                 startInferenceLoop()
             } catch (t: Throwable) {
                 AppPrefs.setStatus(this, "Greška: " + (t.message ?: "nepoznata"))
@@ -377,6 +395,17 @@ class VoiceDialService : Service() {
                         }
 
                         if (segment != null && segment.size >= 8_000) {
+                            if (!isLikelyNameSpeech(segment)) {
+                                AppPrefs.setStatus(this, "RECI IME")
+                                AppPrefs.setNameDebug(
+                                    this,
+                                    "Odbačen zvuk koji ne liči dovoljno na govor"
+                                )
+                                updateServiceNotification("RECI IME")
+                                nameSegmenter.reset()
+                                continue
+                            }
+
                             nameInferencePending = true
                             AppPrefs.setStatus(this, "PREPOZNAJEM IME…")
                             AppPrefs.setNameDebug(
@@ -405,8 +434,10 @@ class VoiceDialService : Service() {
                         val segment = confirmationSegmenter.accept(frame)
 
                         if (!wasSpeaking && confirmationSegmenter.speechStarted) {
-                            AppPrefs.setStatus(this, "Čujem potvrdu ili novo ime…")
-                            updateServiceNotification("Slušam potvrdu ili novo ime…")
+                            AppPrefs.setStatus(this, "Čujem komandu…")
+                            updateServiceNotification(
+                                "Slušam ZOVI / MOŽE / OK / OTKAŽI / HALO TELEFON"
+                            )
                         }
 
                         if (confirmationSegmenter.timedOut) {
@@ -424,7 +455,7 @@ class VoiceDialService : Service() {
                             AppPrefs.setStatus(this, "Proveravam potvrdu…")
                             AppPrefs.setNameDebug(
                                 this,
-                                "Kratka potvrda/novo ime: " +
+                                "Komanda: " +
                                     "%.2f".format(segment.size / SAMPLE_RATE.toDouble()) +
                                     " s"
                             )
@@ -530,71 +561,51 @@ class VoiceDialService : Service() {
                 }
 
                 Mode.WAIT_CONFIRM -> {
-                    // First pass is deliberately command-only. Short words such as
-                    // "zovi" must not be sent straight into contact matching.
+                    // A selected contact locks the interaction. At this point
+                    // random speech/noise must never be interpreted as another
+                    // contact. We only accept: confirm, cancel, or a fresh wake.
+                    val wake = runCatching {
+                        acousticWakeStore.match(audio)
+                    }.getOrNull()
+
+                    if (wake?.matched == true) {
+                        beginFreshNameAfterWake()
+                        continue
+                    }
+
                     val commandText = transcribeShort(
                         audio,
-                        "zovi, može, ok, okej, pozovi, otkaži",
+                        "Komanda: zovi, može, ok, okej, pozovi, otkaži, odustani, prekini.",
                         "komanda"
                     )
+                    nameInferencePending = false
 
                     if (isCancelCommand(commandText)) {
-                        nameInferencePending = false
                         AppPrefs.setLastHeard(this, commandText)
                         cancelCurrentInteraction("Otkazano glasom.")
                         continue
                     }
 
                     if (isConfirmation(commandText)) {
-                        nameInferencePending = false
                         AppPrefs.setLastHeard(this, commandText)
                         confirmSelectedCall()
                         continue
                     }
 
-                    // Only when the command pass clearly was NOT a confirmation do
-                    // we run the same audio as a possible replacement contact name.
-                    val nameForms = recognizeNameForms(audio)
-                    nameInferencePending = false
-
-                    if (nameForms.isEmpty()) {
-                        AppPrefs.setStatus(
-                            this,
-                            "Nisam razumeo. Reci ‘može’, ‘ok’, ‘zovi’ ili drugo ime."
-                        )
-                        beepError()
-                        continue
-                    }
-
-                    val cancelFromFallback =
-                        nameForms.firstOrNull { isCancelCommand(it) }
-
-                    if (cancelFromFallback != null) {
-                        AppPrefs.setLastHeard(
-                            this,
-                            cancelFromFallback
-                        )
-                        cancelCurrentInteraction("Otkazano glasom.")
-                        continue
-                    }
-
-                    val confirmationFromFallback =
-                        nameForms.firstOrNull { isConfirmation(it) }
-
-                    if (confirmationFromFallback != null) {
-                        AppPrefs.setLastHeard(
-                            this,
-                            confirmationFromFallback
-                        )
-                        confirmSelectedCall()
-                        continue
-                    }
-
-                    AppPrefs.setLastHeard(
+                    // Unknown sound/utterance is ignored on purpose.
+                    AppPrefs.setNameDebug(
                         this,
-                        nameForms.joinToString(" / ")
+                        "Ignorisano u potvrdi: " +
+                            if (commandText.isBlank()) "(bez teksta)"
+                            else commandText
                     )
-                    handleNameForms(nameForms)
+                    AppPrefs.setStatus(
+                        this,
+                        "Čekam ZOVI / MOŽE / OK / OTKAŽI. Za novi kontakt reci ‘HALO TELEFON’."
+                    )
+                    updateServiceNotification(
+                        "Čekam potvrdu • HALO TELEFON = novo ime"
+                    )
                 }
             }
         }
@@ -644,12 +655,17 @@ class VoiceDialService : Service() {
             .any { word ->
                 word in setOf(
                     "otkazi",
+                    "odkazi",
+                    "otkaz",
+                    "otkaze",
                     "otkazi",
                     "odustani",
                     "ponisti",
-                    "prekini"
+                    "prekini",
+                    "stop"
                 ) ||
-                    editDistanceAtMostOne(word, "otkazi")
+                    editDistanceAtMostOne(word, "otkazi") ||
+                    SerbianPhonetics.similarity(word, "otkazi") >= 0.72
             }
     }
 
@@ -754,6 +770,97 @@ class VoiceDialService : Service() {
         )
         updateServiceNotification("ČEKAM: ‘HALO TELEFON’")
         beepReady()
+    }
+
+    private fun beginFreshNameAfterWake() {
+        selectedContact = null
+        selectedSpoken = ""
+        nameInferencePending = false
+        segmentQueue.clear()
+        mode = Mode.WAIT_NAME
+        nameCaptureAllowedAtMs =
+            SystemClock.elapsedRealtime() + 550L
+
+        sendBroadcast(
+            Intent(CandidateActivity.ACTION_CLOSE_PICKER)
+                .setPackage(packageName)
+        )
+        getSystemService(NotificationManager::class.java)
+            .cancel(CANDIDATE_NOTIFICATION_ID)
+
+        AppPrefs.setStatus(this, "RECI IME")
+        AppPrefs.setNameDebug(
+            this,
+            "Nova wake komanda u režimu potvrde"
+        )
+        updateServiceNotification("RECI IME")
+        beepReady()
+    }
+
+    private fun isLikelyNameSpeech(
+        audio: FloatArray
+    ): Boolean {
+        if (audio.size < 8_000) return false
+
+        val frame = 320
+        val rmsValues = ArrayList<Double>()
+        val zcrValues = ArrayList<Double>()
+        var offset = 0
+
+        while (offset + frame <= audio.size) {
+            var energy = 0.0
+            var crossings = 0
+            var previous = audio[offset]
+
+            for (i in offset until offset + frame) {
+                val sample = audio[i]
+                energy += sample * sample
+
+                if (
+                    (sample >= 0f && previous < 0f) ||
+                    (sample < 0f && previous >= 0f)
+                ) {
+                    crossings++
+                }
+                previous = sample
+            }
+
+            rmsValues += kotlin.math.sqrt(
+                energy / frame.toDouble()
+            )
+            zcrValues +=
+                crossings.toDouble() / frame.toDouble()
+            offset += frame
+        }
+
+        if (rmsValues.isEmpty()) return false
+
+        val peak =
+            rmsValues.maxOrNull() ?: return false
+        if (peak < 0.0075) return false
+
+        val threshold =
+            maxOf(0.0045, peak * 0.22)
+
+        val active =
+            rmsValues.indices.filter {
+                rmsValues[it] >= threshold
+            }
+
+        if (active.size < 6) return false
+
+        val spanFrames =
+            active.last() - active.first() + 1
+        if (spanFrames < 9) return false
+
+        val averageZcr =
+            active.map { zcrValues[it] }
+                .average()
+
+        // Impulsive / hiss-like noises tend to have very high ZCR.
+        if (averageZcr > 0.34) return false
+
+        return true
     }
 
     private fun confirmSelectedCall() {
@@ -996,11 +1103,11 @@ class VoiceDialService : Service() {
         AppPrefs.setStatus(
             this,
             "OZNAČEN: " + selected.contact.displayName +
-                " • RECI ZOVI / MOŽE / OK, DRUGO IME ILI OTKAŽI"
+                " • ZOVI / MOŽE / OK / OTKAŽI • HALO TELEFON = NOVO IME"
         )
 
         updateServiceNotification(
-            "ZOVI / MOŽE / OK • DRUGO IME • OTKAŽI"
+            "ZOVI / MOŽE / OK / OTKAŽI • HALO TELEFON = NOVO IME"
         )
 
         showCandidatePicker(
@@ -1135,13 +1242,9 @@ class VoiceDialService : Service() {
                 ?.score ?: 0.0
         }
 
-        val shortAudio =
-            audio.size.toDouble() / SAMPLE_RATE <= 1.35
-
         if (
-            shortAudio ||
             primary.isBlank() ||
-            primaryScore < 0.78
+            primaryScore < 0.60
         ) {
             val contactAware = transcribeShort(
                 audio,
@@ -1610,6 +1713,7 @@ class VoiceDialService : Service() {
 
         audioExecutor.shutdownNow()
         inferenceExecutor.shutdownNow()
+        contactExecutor.shutdownNow()
 
         super.onDestroy()
     }
