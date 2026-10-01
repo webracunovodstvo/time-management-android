@@ -70,9 +70,11 @@ class VoiceDialService : Service() {
     private var noiseSuppressor: NoiseSuppressor? = null
     private var automaticGainControl: AutomaticGainControl? = null
     private var screenWakeLock: PowerManager.WakeLock? = null
+    private var interactionScreenWakeLock: PowerManager.WakeLock? = null
 
     @Volatile private var ignoreAudioUntilMs: Long = 0L
     @Volatile private var nameCaptureAllowedAtMs: Long = 0L
+    @Volatile private var wakeAllowedAtMs: Long = 0L
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -140,6 +142,7 @@ class VoiceDialService : Service() {
                 segmentQueue.clear()
                 nameCaptureAllowedAtMs =
                     SystemClock.elapsedRealtime() + 550L
+                acquireInteractionScreenLock()
                 AppPrefs.setStatus(this, "Test imena. Posle tona reci ime i prezime.")
                 AppPrefs.setNameDebug(this, "Direktan test imena, wake je preskočen")
             }
@@ -151,6 +154,7 @@ class VoiceDialService : Service() {
 
                 if (key.isNotBlank() && name.isNotBlank() && number.isNotBlank()) {
                     selectedContact = ContactPhone(key, name, number)
+                    acquireInteractionScreenLock()
                     mode = Mode.WAIT_CONFIRM
                     nameInferencePending = false
                     segmentQueue.clear()
@@ -380,6 +384,7 @@ class VoiceDialService : Service() {
                             observedMode = mode
                             selectedContact = null
                             selectedSpoken = ""
+                            releaseInteractionScreenLock()
 
                             AppPrefs.setStatus(
                                 this,
@@ -417,6 +422,7 @@ class VoiceDialService : Service() {
                             if (!segmentQueue.offer(segment)) {
                                 nameInferencePending = false
                                 mode = Mode.WAIT_WAKE
+                                releaseInteractionScreenLock()
                                 AppPrefs.setStatus(
                                     this,
                                     "Audio red je zauzet. Pokušaj ponovo."
@@ -503,6 +509,14 @@ class VoiceDialService : Service() {
                     }
 
                     Mode.WAIT_WAKE -> {
+                        if (
+                            SystemClock.elapsedRealtime() <
+                            wakeAllowedAtMs
+                        ) {
+                            wakeSegmenter.reset()
+                            continue
+                        }
+
                         val segment =
                             wakeSegmenter.accept(
                                 frame,
@@ -544,6 +558,7 @@ class VoiceDialService : Service() {
                             "(Whisper nije vratio tekst)"
                         )
                         mode = Mode.WAIT_WAKE
+                        releaseInteractionScreenLock()
                         AppPrefs.setStatus(
                             this,
                             "Nisam razumeo ime. ČEKAM: ‘HALO TELEFON’"
@@ -561,21 +576,11 @@ class VoiceDialService : Service() {
                 }
 
                 Mode.WAIT_CONFIRM -> {
-                    // A selected contact locks the interaction. At this point
-                    // random speech/noise must never be interpreted as another
-                    // contact. We only accept: confirm, cancel, or a fresh wake.
-                    val wake = runCatching {
-                        acousticWakeStore.match(audio)
-                    }.getOrNull()
-
-                    if (wake?.matched == true) {
-                        beginFreshNameAfterWake()
-                        continue
-                    }
-
+                    // IMPORTANT: command recognition comes first. "Otkaži"
+                    // must never be mistaken for the acoustic wake phrase.
                     val commandText = transcribeShort(
                         audio,
-                        "Komanda: zovi, može, ok, okej, pozovi, otkaži, odustani, prekini.",
+                        "Komanda: zovi, može, ok, okej, pozovi, otkaži, odustani, prekini, halo telefon.",
                         "komanda"
                     )
                     nameInferencePending = false
@@ -592,7 +597,21 @@ class VoiceDialService : Service() {
                         continue
                     }
 
-                    // Unknown sound/utterance is ignored on purpose.
+                    // A new contact is allowed only after BOTH textual and
+                    // acoustic evidence for "Halo telefon".
+                    if (isWakeCommand(commandText)) {
+                        val wake = runCatching {
+                            acousticWakeStore.match(audio)
+                        }.getOrNull()
+
+                        if (wake?.matched == true) {
+                            AppPrefs.setLastHeard(this, commandText)
+                            beginFreshNameAfterWake()
+                            continue
+                        }
+                    }
+
+                    // Unknown sounds/words are intentionally ignored.
                     AppPrefs.setNameDebug(
                         this,
                         "Ignorisano u potvrdi: " +
@@ -669,6 +688,27 @@ class VoiceDialService : Service() {
             }
     }
 
+    private fun isWakeCommand(raw: String): Boolean {
+        val normalized = normalizeCommand(raw)
+        if (normalized.isBlank()) return false
+
+        val words = normalized
+            .split(' ')
+            .filter { it.isNotBlank() }
+
+        val hasHalo = words.any {
+            it == "halo" ||
+                editDistanceAtMostOne(it, "halo")
+        }
+
+        val hasTelefon = words.any {
+            it == "telefon" ||
+                editDistanceAtMostOne(it, "telefon")
+        }
+
+        return hasHalo && hasTelefon
+    }
+
     private fun isConfirmation(raw: String): Boolean {
         val normalized = normalizeCommand(raw)
         if (normalized.isBlank()) return false
@@ -705,6 +745,8 @@ class VoiceDialService : Service() {
             .replace("одустани", "odustani")
             .replace("поништи", "ponisti")
             .replace("прекини", "prekini")
+            .replace("хало", "halo")
+            .replace("телефон", "telefon")
             .replace('đ', 'd')
             .replace('Đ', 'd')
 
@@ -755,6 +797,11 @@ class VoiceDialService : Service() {
         nameInferencePending = false
         segmentQueue.clear()
         mode = Mode.WAIT_WAKE
+        releaseInteractionScreenLock()
+        wakeAllowedAtMs =
+            SystemClock.elapsedRealtime() + 1_200L
+        ignoreAudioUntilMs =
+            SystemClock.elapsedRealtime() + 900L
 
         sendBroadcast(
             Intent(CandidateActivity.ACTION_CLOSE_PICKER)
@@ -778,6 +825,7 @@ class VoiceDialService : Service() {
         nameInferencePending = false
         segmentQueue.clear()
         mode = Mode.WAIT_NAME
+        acquireInteractionScreenLock()
         nameCaptureAllowedAtMs =
             SystemClock.elapsedRealtime() + 550L
 
@@ -915,6 +963,9 @@ class VoiceDialService : Service() {
         selectedContact = null
         selectedSpoken = ""
         mode = Mode.WAIT_WAKE
+        releaseInteractionScreenLock()
+        wakeAllowedAtMs =
+            SystemClock.elapsedRealtime() + 1_200L
         updateServiceNotification("Slušam: ‘Halo telefon’")
         beepSuccess()
 
@@ -949,6 +1000,7 @@ class VoiceDialService : Service() {
 
         selectedContact = null
         selectedSpoken = ""
+        acquireInteractionScreenLock()
         mode = Mode.WAIT_NAME
         nameInferencePending = false
         segmentQueue.clear()
@@ -1487,6 +1539,39 @@ class VoiceDialService : Service() {
         }
     }
 
+    @Suppress("DEPRECATION")
+    private fun acquireInteractionScreenLock() {
+        if (interactionScreenWakeLock?.isHeld == true) {
+            return
+        }
+
+        val pm =
+            getSystemService(
+                PowerManager::class.java
+            )
+
+        interactionScreenWakeLock =
+            pm.newWakeLock(
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK,
+                "HaloTelefon:ActiveInteraction"
+            ).apply {
+                setReferenceCounted(false)
+                acquire()
+            }
+    }
+
+    private fun releaseInteractionScreenLock() {
+        interactionScreenWakeLock?.let { lock ->
+            if (lock.isHeld) {
+                runCatching {
+                    lock.release()
+                }
+            }
+        }
+
+        interactionScreenWakeLock = null
+    }
+
     private fun syncScreenWakeLock() {
         val pm =
             getSystemService(
@@ -1705,6 +1790,7 @@ class VoiceDialService : Service() {
         }
 
         tone?.release()
+        releaseInteractionScreenLock()
         releaseScreenWakeLock()
 
         runCatching {
