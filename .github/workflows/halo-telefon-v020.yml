@@ -1,8 +1,6 @@
 name: Build Halo Telefon v0.20
 
 on:
-  push:
-    branches: [ halo-telefon-v020 ]
   workflow_dispatch:
 
 jobs:
@@ -15,7 +13,7 @@ jobs:
       - name: Restore Halo Telefon source
         run: |
           mkdir -p build-halo
-          base64 -d halo-telefon-v020/source.tar.gz.b64 | tar -xz -C build-halo
+          cat halo-telefon-v020/part-* | base64 -d | tar -xz -C build-halo
 
       - uses: actions/setup-java@v4
         with:
@@ -32,7 +30,7 @@ jobs:
 
       - name: Install Android NDK and CMake
         run: |
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"             "platforms;android-35"             "build-tools;35.0.0"             "ndk;27.0.12077973"             "cmake;3.22.1"
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" "ndk;27.0.12077973" "cmake;3.22.1"
 
       - name: Build debug APK
         working-directory: build-halo
