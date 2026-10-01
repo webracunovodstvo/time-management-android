@@ -482,16 +482,29 @@ class VoiceDialService : Service() {
                         }
                     }
 
+                    Mode.WAIT_SELECT,
                     Mode.WAIT_CONFIRM -> {
                         if (nameInferencePending) continue
 
-                        val wasSpeaking = confirmationSegmenter.speechStarted
-                        val segment = confirmationSegmenter.accept(frame)
+                        val wasSpeaking =
+                            confirmationSegmenter.speechStarted
+                        val segment =
+                            confirmationSegmenter.accept(frame)
 
-                        if (!wasSpeaking && confirmationSegmenter.speechStarted) {
-                            AppPrefs.setStatus(this, "Čujem komandu…")
+                        if (
+                            !wasSpeaking &&
+                            confirmationSegmenter.speechStarted
+                        ) {
+                            AppPrefs.setStatus(
+                                this,
+                                "Čujem komandu…"
+                            )
                             updateServiceNotification(
-                                "Slušam ZOVI / MOŽE / OK / OTKAŽI / HALO TELEFON"
+                                if (currentMode == Mode.WAIT_SELECT) {
+                                    "Slušam PRVI / DRUGI / TREĆI / ČETVRTI / PETI / OTKAŽI"
+                                } else {
+                                    "Slušam ZOVI / MOŽE / OK / OTKAŽI / HALO TELEFON"
+                                }
                             )
                         }
 
@@ -499,31 +512,54 @@ class VoiceDialService : Service() {
                             confirmationSegmenter.reset()
                             AppPrefs.setStatus(
                                 this,
-                                "Čekam ZOVI / MOŽE / OK / OTKAŽI. Za novi kontakt reci ‘HALO TELEFON’."
+                                if (currentMode == Mode.WAIT_SELECT) {
+                                    selectionStatus()
+                                } else {
+                                    confirmationStatus()
+                                }
                             )
                             updateServiceNotification(
-                                "Čekam potvrdu • HALO TELEFON = novo ime"
+                                if (currentMode == Mode.WAIT_SELECT) {
+                                    "Izaberi broj kontakta glasom"
+                                } else {
+                                    "Čekam potvrdu • HALO TELEFON = novo ime"
+                                }
                             )
                             continue
                         }
 
-                        // Short commands must be allowed through; 0.2 s is enough
-                        // because ConfirmationSegmenter includes pre-roll/silence
-                        // and Whisper gets extra padding before inference.
-                        if (segment != null && segment.size >= 3_200) {
+                        if (
+                            segment != null &&
+                            segment.size >= 3_200
+                        ) {
                             nameInferencePending = true
-                            AppPrefs.setStatus(this, "Proveravam potvrdu…")
+                            AppPrefs.setStatus(
+                                this,
+                                "Proveravam komandu…"
+                            )
                             AppPrefs.setNameDebug(
                                 this,
                                 "Komanda: " +
-                                    "%.2f".format(segment.size / SAMPLE_RATE.toDouble()) +
+                                    "%.2f".format(
+                                        segment.size /
+                                            SAMPLE_RATE.toDouble()
+                                    ) +
                                     " s"
                             )
-                            updateServiceNotification("Proveravam potvrdu…")
+                            updateServiceNotification(
+                                "Proveravam komandu…"
+                            )
 
                             if (!segmentQueue.offer(segment)) {
                                 nameInferencePending = false
-                                AppPrefs.setStatus(this, "Pokušaj potvrdu ponovo.")
+                                AppPrefs.setStatus(
+                                    this,
+                                    if (currentMode == Mode.WAIT_SELECT) {
+                                        selectionStatus()
+                                    } else {
+                                        confirmationStatus()
+                                    }
+                                )
                                 beepError()
                             }
                         }
@@ -559,6 +595,38 @@ class VoiceDialService : Service() {
                             // Training does not need Whisper. Process immediately
                             // so contact/model loading cannot block the 5 samples.
                             handleWakeTraining(segment)
+                        }
+                    }
+
+                    Mode.TRAIN_COMMANDS -> {
+                        val wasSpeaking =
+                            confirmationSegmenter.speechStarted
+
+                        val segment =
+                            confirmationSegmenter.accept(frame)
+
+                        if (
+                            !wasSpeaking &&
+                            confirmationSegmenter.speechStarted
+                        ) {
+                            AppPrefs.setStatus(
+                                this,
+                                "SNIMAM: " +
+                                    currentTrainingCommand()
+                                        .spokenLabel
+                            )
+                            updateServiceNotification(
+                                "Snimam glasovnu komandu"
+                            )
+                        }
+
+                        if (
+                            segment != null &&
+                            segment.size >= 3_200
+                        ) {
+                            handleCommandTraining(
+                                segment
+                            )
                         }
                     }
 
