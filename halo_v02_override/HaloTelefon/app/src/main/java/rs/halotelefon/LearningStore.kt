@@ -5,6 +5,11 @@ import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
 
+data class ContactUsageStats(
+    val totalUses: Int,
+    val lastUsed: Long
+)
+
 class LearningStore(
     context: Context
 ) : SQLiteOpenHelper(
@@ -42,71 +47,123 @@ class LearningStore(
     fun uses(
         spokenRaw: String,
         lookupKey: String
-    ): Int {
+    ): Int =
+        usesForSpoken(spokenRaw)[lookupKey] ?: 0
+
+    fun usesForSpoken(
+        spokenRaw: String
+    ): Map<String, Int> {
         val spoken =
             SerbianNormalizer.normalize(spokenRaw)
         val phonetic =
             phoneticKey(spokenRaw)
 
-        val exactUses =
-            queryUses(spoken, lookupKey)
-        val phoneticUses =
-            if (phonetic.isBlank()) 0
-            else queryUses(
-                PHONETIC_PREFIX + phonetic,
-                lookupKey
-            )
+        if (
+            spoken.isBlank() &&
+            phonetic.isBlank()
+        ) {
+            return emptyMap()
+        }
 
-        return maxOf(
-            exactUses,
-            phoneticUses
-        )
+        val storedForms =
+            buildList {
+                if (spoken.isNotBlank()) {
+                    add(spoken)
+                }
+                if (phonetic.isNotBlank()) {
+                    add(PHONETIC_PREFIX + phonetic)
+                }
+            }
+                .distinct()
+
+        if (storedForms.isEmpty()) {
+            return emptyMap()
+        }
+
+        val placeholders =
+            storedForms.joinToString(",") { "?" }
+
+        val result =
+            LinkedHashMap<String, Int>()
+
+        readableDatabase.rawQuery(
+            """
+            SELECT contact_lookup_key, MAX(uses)
+            FROM learned_matches
+            WHERE spoken IN ($placeholders)
+            GROUP BY contact_lookup_key
+            """.trimIndent(),
+            storedForms.toTypedArray()
+        ).use { c ->
+            while (c.moveToNext()) {
+                result[c.getString(0)] =
+                    c.getInt(1)
+            }
+        }
+
+        return result
     }
 
     fun totalUses(
         lookupKey: String
-    ): Int {
-        readableDatabase.rawQuery(
-            """
-            SELECT COALESCE(SUM(uses), 0)
-            FROM learned_matches
-            WHERE contact_lookup_key=?
-              AND spoken NOT LIKE ?
-            """.trimIndent(),
-            arrayOf(
-                lookupKey,
-                PHONETIC_PREFIX + "%"
-            )
-        ).use { c ->
-            return if (c.moveToFirst()) {
-                c.getInt(0)
-            } else {
-                0
-            }
-        }
-    }
+    ): Int =
+        statsFor(listOf(lookupKey))[lookupKey]
+            ?.totalUses ?: 0
 
     fun lastUsed(
         lookupKey: String
-    ): Long {
-        readableDatabase.rawQuery(
-            """
-            SELECT COALESCE(MAX(last_used), 0)
-            FROM learned_matches
-            WHERE contact_lookup_key=?
-              AND spoken NOT LIKE ?
-            """.trimIndent(),
-            arrayOf(
-                lookupKey,
-                PHONETIC_PREFIX + "%"
-            )
-        ).use { c ->
-            return if (c.moveToFirst()) {
-                c.getLong(0)
-            } else {
-                0L
+    ): Long =
+        statsFor(listOf(lookupKey))[lookupKey]
+            ?.lastUsed ?: 0L
+
+    fun statsFor(
+        lookupKeys: Collection<String>
+    ): Map<String, ContactUsageStats> {
+        val keys =
+            lookupKeys
+                .filter { it.isNotBlank() }
+                .distinct()
+
+        if (keys.isEmpty()) {
+            return emptyMap()
+        }
+
+        val result =
+            LinkedHashMap<String, ContactUsageStats>()
+
+        // Candidate lists contain at most 30 contacts, so one compact IN
+        // query replaces dozens of per-contact SQLite queries.
+        keys.chunked(400).forEach { chunk ->
+            val placeholders =
+                chunk.joinToString(",") { "?" }
+
+            val args =
+                arrayOf(PHONETIC_PREFIX + "%") +
+                    chunk.toTypedArray()
+
+            readableDatabase.rawQuery(
+                """
+                SELECT contact_lookup_key,
+                       COALESCE(SUM(uses), 0),
+                       COALESCE(MAX(last_used), 0)
+                FROM learned_matches
+                WHERE spoken NOT LIKE ?
+                  AND contact_lookup_key IN ($placeholders)
+                GROUP BY contact_lookup_key
+                """.trimIndent(),
+                args
+            ).use { c ->
+                while (c.moveToNext()) {
+                    result[c.getString(0)] =
+                        ContactUsageStats(
+                            totalUses = c.getInt(1),
+                            lastUsed = c.getLong(2)
+                        )
+                }
             }
         }
+
+        return result
     }
 
     fun record(
