@@ -71,6 +71,7 @@ class VoiceDialService : Service() {
     private var screenWakeLock: PowerManager.WakeLock? = null
 
     @Volatile private var ignoreAudioUntilMs: Long = 0L
+    @Volatile private var nameCaptureAllowedAtMs: Long = 0L
 
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -136,6 +137,8 @@ class VoiceDialService : Service() {
                 mode = Mode.WAIT_NAME
                 nameInferencePending = false
                 segmentQueue.clear()
+                nameCaptureAllowedAtMs =
+                    SystemClock.elapsedRealtime() + 550L
                 AppPrefs.setStatus(this, "Test imena. Posle tona reci ime i prezime.")
                 AppPrefs.setNameDebug(this, "Direktan test imena, wake je preskočen")
             }
@@ -232,8 +235,9 @@ class VoiceDialService : Service() {
                 // Heavy resources load only after the microphone is already live.
                 val model = ModelManager.ensureModel(this)
                 whisper = WhisperContext(model.absolutePath)
-                contactCache = loadContactsSafely()
 
+                // Contact loading is lazy and optimized; do not block wake/name
+                // state transitions before the inference loop starts.
                 startInferenceLoop()
             } catch (t: Throwable) {
                 AppPrefs.setStatus(this, "Greška: " + (t.message ?: "nepoznata"))
@@ -335,6 +339,14 @@ class VoiceDialService : Service() {
                 when (currentMode) {
                     Mode.WAIT_NAME -> {
                         if (nameInferencePending) continue
+
+                        if (
+                            SystemClock.elapsedRealtime() <
+                            nameCaptureAllowedAtMs
+                        ) {
+                            nameSegmenter.reset()
+                            continue
+                        }
 
                         val wasSpeaking = nameSegmenter.speechStarted
                         val segment = nameSegmenter.accept(frame)
@@ -833,6 +845,8 @@ class VoiceDialService : Service() {
         mode = Mode.WAIT_NAME
         nameInferencePending = false
         segmentQueue.clear()
+        nameCaptureAllowedAtMs =
+            SystemClock.elapsedRealtime() + 550L
 
         AppPrefs.setStatus(
             this,
@@ -1027,13 +1041,13 @@ class VoiceDialService : Service() {
     private fun buildShortNamePrompt(
         contacts: List<ContactPhone>
     ): String {
-        val orderedContacts = contacts.sortedWith(
-            compareByDescending<ContactPhone> {
-                learningStore.totalUses(it.lookupKey)
-            }.thenBy {
+        // Do not query SQLite from a sort comparator. This prompt is only
+        // a compact local vocabulary hint; contact frequency is applied later
+        // by ContactMatcher/LearningStore.
+        val orderedContacts =
+            contacts.sortedBy {
                 it.displayName.length
             }
-        )
 
         val tokens = LinkedHashSet<String>()
 
@@ -1066,9 +1080,11 @@ class VoiceDialService : Service() {
             if (builder.length + token.length + 2 > 1600) {
                 break
             }
+
             if (builder.length > prefix.length) {
                 builder.append(", ")
             }
+
             builder.append(token)
         }
 
@@ -1078,7 +1094,6 @@ class VoiceDialService : Service() {
     private fun recognizeNameForms(
         audio: FloatArray
     ): List<String> {
-        val contacts = getContacts()
         val forms = ArrayList<String>(2)
 
         val primary = transcribeShort(
@@ -1089,7 +1104,27 @@ class VoiceDialService : Service() {
 
         if (primary.isNotBlank()) {
             forms.add(primary)
+
+            // Show the raw result immediately. Contact loading and the
+            // contact-aware fallback must not leave diagnostics at "Još ništa".
+            AppPrefs.setLastHeard(
+                this,
+                primary
+            )
         }
+
+        AppPrefs.setNameDebug(
+            this,
+            "Primarno: " +
+                if (primary.isBlank()) {
+                    "(prazno)"
+                } else {
+                    primary
+                } +
+                " • proveravam imenik"
+        )
+
+        val contacts = getContacts()
 
         val primaryScore = if (primary.isBlank()) {
             0.0
