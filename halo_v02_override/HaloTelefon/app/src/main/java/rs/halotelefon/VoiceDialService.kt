@@ -168,6 +168,7 @@ class VoiceDialService : Service() {
             ACTION_TEST_NAME -> {
                 selectedContact = null
                 selectedSpoken = ""
+                pendingCandidates = emptyList()
                 mode = Mode.WAIT_NAME
                 nameInferencePending = false
                 segmentQueue.clear()
@@ -1233,6 +1234,7 @@ class VoiceDialService : Service() {
     private fun cancelCurrentInteraction(reason: String) {
         selectedContact = null
         selectedSpoken = ""
+        pendingCandidates = emptyList()
         nameInferencePending = false
         segmentQueue.clear()
         mode = Mode.WAIT_WAKE
@@ -1266,6 +1268,7 @@ class VoiceDialService : Service() {
     private fun beginFreshNameAfterWake() {
         selectedContact = null
         selectedSpoken = ""
+        pendingCandidates = emptyList()
         nameInferencePending = false
         segmentQueue.clear()
         mode = Mode.WAIT_NAME
@@ -1629,6 +1632,7 @@ class VoiceDialService : Service() {
             .distinct()
 
         if (forms.isEmpty()) {
+            pendingCandidates = emptyList()
             mode = Mode.WAIT_NAME
             AppPrefs.setStatus(this, "Nisam razumeo ime. Reci ponovo.")
             beepError()
@@ -1646,6 +1650,7 @@ class VoiceDialService : Service() {
         if (best == null || best.score < 0.58) {
             selectedContact = null
             selectedSpoken = ""
+            pendingCandidates = emptyList()
             mode = Mode.WAIT_NAME
             AppPrefs.setStatus(
                 this,
