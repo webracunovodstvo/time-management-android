@@ -1,6 +1,8 @@
 name: Build Halo Telefon v0.20
 
 on:
+  push:
+    branches: [ halo-telefon-v020 ]
   workflow_dispatch:
 
 jobs:
