@@ -13,33 +13,86 @@ object AppPrefs {
     const val KEY_PENDING_SPOKEN = "pending_spoken"
     const val KEY_WAKE_ALIASES = "wake_aliases"
     const val KEY_KEEP_AWAKE = "keep_awake"
+    const val KEY_COMMAND_PROFILE = "command_profile"
 
-    fun prefs(context: Context) = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+    fun prefs(context: Context) =
+        context.getSharedPreferences(
+            FILE,
+            Context.MODE_PRIVATE
+        )
 
-    fun setStatus(context: Context, value: String) {
-        prefs(context).edit().putString(KEY_STATUS, value).apply()
+    fun setStatus(
+        context: Context,
+        value: String
+    ) {
+        prefs(context).edit()
+            .putString(KEY_STATUS, value)
+            .apply()
     }
 
-    fun setLastHeard(context: Context, value: String) {
-        prefs(context).edit().putString(KEY_LAST_HEARD, value).apply()
+    fun setLastHeard(
+        context: Context,
+        value: String
+    ) {
+        prefs(context).edit()
+            .putString(KEY_LAST_HEARD, value)
+            .apply()
     }
 
-    fun setLastMatch(context: Context, value: String) {
-        prefs(context).edit().putString(KEY_LAST_MATCH, value).apply()
+    fun setLastMatch(
+        context: Context,
+        value: String
+    ) {
+        prefs(context).edit()
+            .putString(KEY_LAST_MATCH, value)
+            .apply()
     }
 
-    fun setLastWake(context: Context, value: String) {
-        prefs(context).edit().putString(KEY_LAST_WAKE, value).apply()
+    fun setLastWake(
+        context: Context,
+        value: String
+    ) {
+        prefs(context).edit()
+            .putString(KEY_LAST_WAKE, value)
+            .apply()
     }
 
-    fun setNameDebug(context: Context, value: String) {
-        prefs(context).edit().putString(KEY_NAME_DEBUG, value).apply()
+    fun setNameDebug(
+        context: Context,
+        value: String
+    ) {
+        prefs(context).edit()
+            .putString(KEY_NAME_DEBUG, value)
+            .apply()
     }
 
-    fun setRunning(context: Context, running: Boolean) {
-        prefs(context).edit().putBoolean(KEY_SERVICE_RUNNING, running).apply()
+    fun setRunning(
+        context: Context,
+        running: Boolean
+    ) {
+        prefs(context).edit()
+            .putBoolean(
+                KEY_SERVICE_RUNNING,
+                running
+            )
+            .apply()
+    }
+
+    fun setCommandProfile(
+        context: Context,
+        value: String
+    ) {
+        prefs(context).edit()
+            .putString(
+                KEY_COMMAND_PROFILE,
+                value
+            )
+            .apply()
     }
 
     fun keepAwake(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_KEEP_AWAKE, false)
+        prefs(context).getBoolean(
+            KEY_KEEP_AWAKE,
+            false
+        )
 }
