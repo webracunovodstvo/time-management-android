@@ -191,7 +191,7 @@ class MainActivity : Activity(),
         })
 
         root.addView(TextView(this).apply {
-            text = "v0.19  •  OTKAŽI bez loop-a • ekran ostaje uključen tokom interakcije"
+            text = "v0.20  •  glasovni izbor kontakta • naučene kratke komande"
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(muted)
@@ -264,6 +264,9 @@ class MainActivity : Activity(),
             raw.contains("PROVERAVAM", true) ||
                 raw.contains("Proveravam", true) ->
                 "PROVERAVAM KOMANDU…"
+
+            raw.contains("IZABERI", true) ->
+                "IZABERI KONTAKT"
 
             raw.contains("OZNAČEN", true) ||
                 raw.contains("Izabrano", true) ||
