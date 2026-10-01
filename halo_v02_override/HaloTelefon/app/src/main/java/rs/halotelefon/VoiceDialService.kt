@@ -1406,6 +1406,7 @@ class VoiceDialService : Service() {
 
         selectedContact = null
         selectedSpoken = ""
+        pendingCandidates = emptyList()
         mode = Mode.WAIT_WAKE
         releaseInteractionScreenLock()
         wakeAllowedAtMs =
@@ -1444,6 +1445,7 @@ class VoiceDialService : Service() {
 
         selectedContact = null
         selectedSpoken = ""
+        pendingCandidates = emptyList()
         acquireInteractionScreenLock()
         mode = Mode.WAIT_NAME
         nameInferencePending = false
@@ -1667,16 +1669,23 @@ class VoiceDialService : Service() {
                         .takeLast(12)
             }
 
+        val usageStats =
+            learningStore.statsFor(
+                plausible.map {
+                    it.contact.lookupKey
+                }
+            )
+
         val ordered = plausible
             .sortedWith(
                 compareByDescending<ContactCandidate> {
-                    learningStore.totalUses(
+                    usageStats[
                         it.contact.lookupKey
-                    )
+                    ]?.totalUses ?: 0
                 }.thenByDescending {
-                    learningStore.lastUsed(
+                    usageStats[
                         it.contact.lookupKey
-                    )
+                    ]?.lastUsed ?: 0L
                 }.thenByDescending {
                     it.score
                 }
@@ -1686,32 +1695,49 @@ class VoiceDialService : Service() {
                 listOf(best)
             }
 
-        val selected = ordered.maxWithOrNull(
-            compareBy<ContactCandidate> {
-                it.score
-            }.thenBy {
-                learningStore.totalUses(
-                    it.contact.lookupKey
-                )
-            }
-        ) ?: ordered.first()
+        val selected =
+            ordered.maxWithOrNull(
+                compareBy<ContactCandidate> {
+                    it.score
+                }.thenBy {
+                    usageStats[
+                        it.contact.lookupKey
+                    ]?.totalUses ?: 0
+                }
+            ) ?: ordered.first()
 
         selectedContact = selected.contact
+        pendingCandidates = ordered
 
         // Keep the first/raw transcript as the learned alias. If Whisper
         // consistently hears a short Serbian name the same wrong way,
         // confirmation teaches that acoustic spelling to the chosen contact.
         selectedSpoken = forms.first()
-        mode = Mode.WAIT_CONFIRM
+
+        mode =
+            if (ordered.size > 1) {
+                Mode.WAIT_SELECT
+            } else {
+                Mode.WAIT_CONFIRM
+            }
 
         AppPrefs.setStatus(
             this,
-            "OZNAČEN: " + selected.contact.displayName +
-                " • ZOVI / MOŽE / OK / OTKAŽI • HALO TELEFON = NOVO IME"
+            if (mode == Mode.WAIT_SELECT) {
+                selectionStatus()
+            } else {
+                "OZNAČEN: " +
+                    selected.contact.displayName +
+                    " • ZOVI / MOŽE / OK / OTKAŽI"
+            }
         )
 
         updateServiceNotification(
-            "ZOVI / MOŽE / OK / OTKAŽI • HALO TELEFON = NOVO IME"
+            if (mode == Mode.WAIT_SELECT) {
+                "PRVI / DRUGI / TREĆI / ČETVRTI / PETI • OTKAŽI"
+            } else {
+                "ZOVI / MOŽE / OK / OTKAŽI • HALO TELEFON = NOVO IME"
+            }
         )
 
         showCandidatePicker(
