@@ -617,6 +617,12 @@ class CandidateActivity : Activity(),
                     "PROVERAVAM KOMANDU…"
 
                 raw.contains(
+                    "IZABERI",
+                    true
+                ) ->
+                    "IZABERI KONTAKT GLASOM"
+
+                raw.contains(
                     "OZNAČEN",
                     true
                 ) ||
