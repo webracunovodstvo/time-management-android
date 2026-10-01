@@ -309,7 +309,7 @@ class SettingsActivity : Activity(),
 
         root.addView(TextView(this).apply {
             text =
-                "v0.17  •  stabilan wake → ime prelaz • lokalno • bez INTERNET dozvole"
+                "v0.18  •  zaključana potvrda • lokalno • bez INTERNET dozvole"
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(muted)
