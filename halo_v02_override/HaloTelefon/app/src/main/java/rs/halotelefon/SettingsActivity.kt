@@ -309,7 +309,7 @@ class SettingsActivity : Activity(),
 
         root.addView(TextView(this).apply {
             text =
-                "v0.14  •  lokalno • bez INTERNET dozvole"
+                "v0.16  •  instant wake trening • lokalno • bez INTERNET dozvole"
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(muted)
