@@ -124,7 +124,7 @@ class AcousticWakeStore(context: Context) {
     }
 }
 
-private object WakeFeatures {
+internal object WakeFeatures {
     private const val SAMPLE_RATE = 16_000
     private const val FRAME = 400
     private const val HOP = 160
