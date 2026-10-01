@@ -24,6 +24,7 @@ class SettingsActivity : Activity(),
     private lateinit var prefs: SharedPreferences
     private lateinit var keepAwakeSwitch: Switch
     private lateinit var wakeValue: TextView
+    private lateinit var commandValue: TextView
     private lateinit var heardValue: TextView
     private lateinit var debugValue: TextView
     private lateinit var matchValue: TextView
@@ -140,6 +141,105 @@ class SettingsActivity : Activity(),
         ))
 
         root.addView(wakeCard, cardParams())
+
+        val commandCard = card()
+
+        commandCard.addView(
+            TextView(this).apply {
+                text = "Glasovne komande"
+                textSize = 18f
+                setTextColor(ink)
+                setTypeface(
+                    typeface,
+                    Typeface.BOLD
+                )
+            }
+        )
+
+        commandCard.addView(
+            TextView(this).apply {
+                text =
+                    "Aplikacija će naučiti tvoj izgovor za OTKAŽI, PRVI, DRUGI, TREĆI, ČETVRTI i PETI. " +
+                        "Svaku komandu izgovaraš 3 puta."
+                textSize = 13f
+                setTextColor(muted)
+                setPadding(
+                    0,
+                    dp(4),
+                    0,
+                    dp(12)
+                )
+            }
+        )
+
+        commandCard.addView(
+            Button(this).apply {
+                text = "Nauči glasovne komande"
+                isAllCaps = false
+                textSize = 15f
+                setTypeface(
+                    typeface,
+                    Typeface.BOLD
+                )
+                setTextColor(Color.WHITE)
+                background =
+                    rounded(
+                        accent,
+                        16f
+                    )
+                setOnClickListener {
+                    if (ensurePermissions()) {
+                        val serviceIntent =
+                            Intent(
+                                this@SettingsActivity,
+                                VoiceDialService::class.java
+                            ).setAction(
+                                VoiceDialService.ACTION_TRAIN_COMMANDS
+                            )
+
+                        if (
+                            prefs.getBoolean(
+                                AppPrefs.KEY_SERVICE_RUNNING,
+                                false
+                            )
+                        ) {
+                            startService(
+                                serviceIntent
+                            )
+                        } else {
+                            startForegroundService(
+                                serviceIntent
+                            )
+                        }
+                    }
+                }
+            },
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(50)
+            )
+        )
+
+        commandValue =
+            TextView(this).apply {
+                textSize = 13f
+                setTextColor(muted)
+                setPadding(
+                    0,
+                    dp(10),
+                    0,
+                    0
+                )
+            }
+
+        commandCard.addView(
+            commandValue
+        )
+
+        root.addView(
+            commandCard,
+            cardParams()
+        )
 
         val screenCard = card()
 
@@ -309,7 +409,7 @@ class SettingsActivity : Activity(),
 
         root.addView(TextView(this).apply {
             text =
-                "v0.19  •  stabilno otkazivanje • ekran budan tokom interakcije"
+                "v0.20  •  naučene glasovne komande • brži izbor kontakta"
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(muted)
@@ -382,6 +482,12 @@ class SettingsActivity : Activity(),
             prefs.getString(
                 AppPrefs.KEY_LAST_WAKE,
                 "Wake profil još nije napravljen"
+            )
+
+        commandValue.text =
+            prefs.getString(
+                AppPrefs.KEY_COMMAND_PROFILE,
+                "Komande još nisu naučene"
             )
 
         heardValue.text =
