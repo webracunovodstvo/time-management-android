@@ -25,6 +25,7 @@ class VoiceDialService : Service() {
     companion object {
         const val ACTION_STOP = "rs.halotelefon.STOP"
         const val ACTION_TRAIN_WAKE = "rs.halotelefon.TRAIN_WAKE"
+        const val ACTION_TRAIN_COMMANDS = "rs.halotelefon.TRAIN_COMMANDS"
         const val ACTION_TEST_NAME = "rs.halotelefon.TEST_NAME"
         const val ACTION_SELECT_CANDIDATE = "rs.halotelefon.SELECT_CANDIDATE"
         const val ACTION_CANCEL_INTERACTION = "rs.halotelefon.CANCEL_INTERACTION"
@@ -43,8 +44,10 @@ class VoiceDialService : Service() {
     private enum class Mode {
         WAIT_WAKE,
         WAIT_NAME,
+        WAIT_SELECT,
         WAIT_CONFIRM,
-        TRAIN_WAKE
+        TRAIN_WAKE,
+        TRAIN_COMMANDS
     }
 
     @Volatile private var mode = Mode.WAIT_WAKE
@@ -53,7 +56,9 @@ class VoiceDialService : Service() {
 
     private var selectedContact: ContactPhone? = null
     private var selectedSpoken: String = ""
+    private var pendingCandidates: List<ContactCandidate> = emptyList()
     private var trainRemaining = 0
+    private var commandTrainingIndex = 0
 
     private val audioExecutor = Executors.newSingleThreadExecutor()
     private val inferenceExecutor = Executors.newSingleThreadExecutor()
@@ -63,6 +68,7 @@ class VoiceDialService : Service() {
     private lateinit var recorder: AudioRecord
     private lateinit var whisper: WhisperContext
     private lateinit var acousticWakeStore: AcousticWakeStore
+    private lateinit var acousticCommandStore: AcousticCommandStore
     private lateinit var learningStore: LearningStore
 
     @Volatile private var contactCache: List<ContactPhone>? = null
@@ -90,7 +96,12 @@ class VoiceDialService : Service() {
 
         createNotificationChannels()
         acousticWakeStore = AcousticWakeStore(this)
+        acousticCommandStore = AcousticCommandStore(this)
         learningStore = LearningStore(this)
+        AppPrefs.setCommandProfile(
+            this,
+            acousticCommandStore.summary()
+        )
         tone = ToneGenerator(AudioManager.STREAM_NOTIFICATION, 76)
 
         val filter = IntentFilter().apply {
@@ -125,6 +136,7 @@ class VoiceDialService : Service() {
             ACTION_TRAIN_WAKE -> {
                 selectedContact = null
                 selectedSpoken = ""
+                pendingCandidates = emptyList()
                 acousticWakeStore.clear()
                 mode = Mode.TRAIN_WAKE
                 nameInferencePending = false
@@ -132,6 +144,25 @@ class VoiceDialService : Service() {
                 segmentQueue.clear()
                 AppPrefs.setLastWake(this, "Novi lokalni audio profil: 0/5")
                 AppPrefs.setStatus(this, "Trening: reci ‘Halo telefon’ 1/5")
+            }
+
+            ACTION_TRAIN_COMMANDS -> {
+                selectedContact = null
+                selectedSpoken = ""
+                pendingCandidates = emptyList()
+                acousticCommandStore.clearAll()
+                commandTrainingIndex = 0
+                mode = Mode.TRAIN_COMMANDS
+                nameInferencePending = false
+                segmentQueue.clear()
+                AppPrefs.setCommandProfile(
+                    this,
+                    acousticCommandStore.summary()
+                )
+                AppPrefs.setStatus(
+                    this,
+                    commandTrainingStatus()
+                )
             }
 
             ACTION_TEST_NAME -> {
@@ -176,6 +207,7 @@ class VoiceDialService : Service() {
         } else {
             when (intent?.action) {
                 ACTION_TRAIN_WAKE,
+                ACTION_TRAIN_COMMANDS,
                 ACTION_TEST_NAME -> beepReady()
             }
         }
@@ -211,13 +243,33 @@ class VoiceDialService : Service() {
                         updateServiceNotification("Slušam ime kontakta")
                     }
 
+                    Mode.WAIT_SELECT -> {
+                        AppPrefs.setStatus(
+                            this,
+                            selectionStatus()
+                        )
+                        updateServiceNotification(
+                            "PRVI / DRUGI / TREĆI / ČETVRTI / PETI • OTKAŽI"
+                        )
+                    }
+
                     Mode.WAIT_CONFIRM -> {
                         AppPrefs.setStatus(
                             this,
-                            "Čekam ZOVI / MOŽE / OK / OTKAŽI. Za novi kontakt reci ‘HALO TELEFON’."
+                            confirmationStatus()
                         )
                         updateServiceNotification(
                             "Čekam potvrdu • HALO TELEFON = novo ime"
+                        )
+                    }
+
+                    Mode.TRAIN_COMMANDS -> {
+                        AppPrefs.setStatus(
+                            this,
+                            commandTrainingStatus()
+                        )
+                        updateServiceNotification(
+                            "Trening glasovnih komandi"
                         )
                     }
 
@@ -239,7 +291,9 @@ class VoiceDialService : Service() {
 
                 if (
                     mode == Mode.TRAIN_WAKE ||
+                    mode == Mode.TRAIN_COMMANDS ||
                     mode == Mode.WAIT_NAME ||
+                    mode == Mode.WAIT_SELECT ||
                     mode == Mode.WAIT_CONFIRM
                 ) {
                     beepReady()
