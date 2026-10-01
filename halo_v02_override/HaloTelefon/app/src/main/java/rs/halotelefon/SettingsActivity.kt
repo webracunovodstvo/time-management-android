@@ -309,7 +309,7 @@ class SettingsActivity : Activity(),
 
         root.addView(TextView(this).apply {
             text =
-                "v0.18  •  zaključana potvrda • lokalno • bez INTERNET dozvole"
+                "v0.19  •  stabilno otkazivanje • ekran budan tokom interakcije"
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(muted)
