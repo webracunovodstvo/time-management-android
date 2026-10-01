@@ -191,7 +191,7 @@ class MainActivity : Activity(),
         })
 
         root.addView(TextView(this).apply {
-            text = "v0.18  •  zaključana potvrda • manje lažnih zvukova • brže ime"
+            text = "v0.19  •  OTKAŽI bez loop-a • ekran ostaje uključen tokom interakcije"
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(muted)
