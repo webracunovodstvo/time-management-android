@@ -1176,6 +1176,16 @@ class VoiceDialService : Service() {
             .replace("прекини", "prekini")
             .replace("хало", "halo")
             .replace("телефон", "telefon")
+            .replace("први", "prvi")
+            .replace("прва", "prva")
+            .replace("други", "drugi")
+            .replace("друга", "druga")
+            .replace("трећи", "treci")
+            .replace("треци", "treci")
+            .replace("четврти", "cetvrti")
+            .replace("четврта", "cetvrta")
+            .replace("пети", "peti")
+            .replace("пета", "peta")
             .replace('đ', 'd')
             .replace('Đ', 'd')
 
@@ -1453,6 +1463,114 @@ class VoiceDialService : Service() {
             "RECI IME"
         )
         beepReady()
+    }
+
+    private fun currentTrainingCommand():
+        LearnedVoiceCommand =
+        LearnedVoiceCommand.values()[
+            commandTrainingIndex.coerceIn(
+                0,
+                LearnedVoiceCommand.values().lastIndex
+            )
+        ]
+
+    private fun commandTrainingStatus(): String {
+        val command =
+            currentTrainingCommand()
+        val count =
+            acousticCommandStore.count(
+                command
+            )
+
+        return "TRENING KOMANDI • RECI „" +
+            command.spokenLabel +
+            "“ " +
+            (count + 1).coerceAtMost(3) +
+            "/3"
+    }
+
+    private fun handleCommandTraining(
+        audio: FloatArray
+    ) {
+        val command =
+            currentTrainingCommand()
+
+        val before =
+            acousticCommandStore.count(
+                command
+            )
+
+        val count =
+            try {
+                acousticCommandStore.addSample(
+                    command,
+                    audio
+                )
+            } catch (t: Throwable) {
+                AppPrefs.setStatus(
+                    this,
+                    t.message
+                        ?: "Ponovi komandu."
+                )
+                beepError()
+                return
+            }
+
+        if (count <= before) {
+            return
+        }
+
+        AppPrefs.setCommandProfile(
+            this,
+            acousticCommandStore.summary()
+        )
+
+        if (count >= 3) {
+            if (
+                commandTrainingIndex <
+                LearnedVoiceCommand.values().lastIndex
+            ) {
+                commandTrainingIndex++
+                AppPrefs.setStatus(
+                    this,
+                    commandTrainingStatus()
+                )
+                updateServiceNotification(
+                    "Sledeća komanda: " +
+                        currentTrainingCommand()
+                            .spokenLabel
+                )
+                beepReady()
+            } else {
+                mode = Mode.WAIT_WAKE
+                segmentQueue.clear()
+                AppPrefs.setStatus(
+                    this,
+                    "Glasovne komande su naučene. " +
+                        "ČEKAM: ‘HALO TELEFON’"
+                )
+                updateServiceNotification(
+                    "ČEKAM: ‘HALO TELEFON’"
+                )
+                beepSuccess()
+            }
+        } else {
+            AppPrefs.setStatus(
+                this,
+                "SNIMLJENO " +
+                    command.spokenLabel +
+                    " " +
+                    count +
+                    "/3 • RECI PONOVO"
+            )
+            updateServiceNotification(
+                command.spokenLabel +
+                    " " +
+                    count +
+                    "/3"
+            )
+            beepReady()
+        }
     }
 
     private fun handleWakeTraining(audio: FloatArray) {
