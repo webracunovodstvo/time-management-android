@@ -380,22 +380,17 @@ class VoiceDialService : Service() {
 
                         if (nameSegmenter.timedOut) {
                             nameSegmenter.reset()
-                            mode = Mode.WAIT_WAKE
-                            observedMode = mode
-                            selectedContact = null
-                            selectedSpoken = ""
-                            releaseInteractionScreenLock()
-
                             AppPrefs.setStatus(
                                 this,
-                                "Nisam čuo ime. ČEKAM: ‘HALO TELEFON’"
+                                "RECI IME • ili reci OTKAŽI"
                             )
                             AppPrefs.setNameDebug(
                                 this,
-                                "Timeout: govor nije detektovan u 5 s"
+                                "Čekam ime; interakcija ostaje aktivna"
                             )
-                            updateServiceNotification("ČEKAM: ‘HALO TELEFON’")
-                            beepError()
+                            updateServiceNotification(
+                                "RECI IME • OTKAŽI"
+                            )
                             continue
                         }
 
@@ -448,8 +443,13 @@ class VoiceDialService : Service() {
 
                         if (confirmationSegmenter.timedOut) {
                             confirmationSegmenter.reset()
-                            cancelCurrentInteraction("Istekao izbor.")
-                            observedMode = mode
+                            AppPrefs.setStatus(
+                                this,
+                                "Čekam ZOVI / MOŽE / OK / OTKAŽI. Za novi kontakt reci ‘HALO TELEFON’."
+                            )
+                            updateServiceNotification(
+                                "Čekam potvrdu • HALO TELEFON = novo ime"
+                            )
                             continue
                         }
 
@@ -565,6 +565,22 @@ class VoiceDialService : Service() {
                         )
                         updateServiceNotification("Slušam: ‘Halo telefon’")
                         beepError()
+                        continue
+                    }
+
+                    val cancelFromName =
+                        forms.firstOrNull {
+                            isCancelCommand(it)
+                        }
+
+                    if (cancelFromName != null) {
+                        AppPrefs.setLastHeard(
+                            this,
+                            cancelFromName
+                        )
+                        cancelCurrentInteraction(
+                            "Otkazano glasom."
+                        )
                         continue
                     }
 
@@ -817,6 +833,11 @@ class VoiceDialService : Service() {
         )
         updateServiceNotification("ČEKAM: ‘HALO TELEFON’")
         beepReady()
+
+        // beepReady uses a short mic ignore window; extend it here so the
+        // cancel acknowledgement itself cannot re-enter wake detection.
+        ignoreAudioUntilMs =
+            SystemClock.elapsedRealtime() + 900L
     }
 
     private fun beginFreshNameAfterWake() {
