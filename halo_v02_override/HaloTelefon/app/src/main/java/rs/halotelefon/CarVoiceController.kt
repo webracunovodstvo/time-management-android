@@ -38,6 +38,7 @@ class CarVoiceController(
     private val executor = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
     private val learningStore = LearningStore(carContext)
+    private val acousticWakeStore = AcousticWakeStore(carContext)
     private var whisper: WhisperContext? = null
     private var state = State()
 
@@ -80,15 +81,28 @@ class CarVoiceController(
                 }
 
                 if (state.candidates.isNotEmpty()) {
+                    val wake = runCatching {
+                        acousticWakeStore.match(audio)
+                    }.getOrNull()
+
+                    if (wake?.matched == true) {
+                        update(
+                            State(
+                                status = "HALO TELEFON prepoznat. Dodirni mikrofon i reci novo ime."
+                            )
+                        )
+                        return@execute
+                    }
+
                     val commandText = transcribe(
                         audio,
-                        "zovi, može, ok, okej, pozovi, otkaži"
+                        "Komanda: zovi, može, ok, okej, pozovi, otkaži, odustani, prekini."
                     )
 
                     if (isCancelCommand(commandText)) {
                         update(
                             State(
-                                status = "Otkazano. Dodirni mikrofon za novi kontakt."
+                                status = "Otkazano. Dodirni mikrofon kada želiš novi kontakt."
                             )
                         )
                         return@execute
@@ -99,33 +113,14 @@ class CarVoiceController(
                         return@execute
                     }
 
-                    val nameForms = recognizeNameForms(audio)
-
-                    if (nameForms.isEmpty()) {
-                        update(
-                            state.copy(
-                                status = "Nisam razumeo. Reci MOŽE, OK, ZOVI ili drugo ime.",
-                                listening = false
-                            )
+                    // Locked confirmation state: never treat arbitrary speech
+                    // or cabin noise as a new contact name.
+                    update(
+                        state.copy(
+                            status = "Čekam ZOVI / MOŽE / OK / OTKAŽI. Za novi kontakt reci HALO TELEFON.",
+                            listening = false
                         )
-                        return@execute
-                    }
-
-                    if (nameForms.any { isCancelCommand(it) }) {
-                        update(
-                            State(
-                                status = "Otkazano. Dodirni mikrofon za novi kontakt."
-                            )
-                        )
-                        return@execute
-                    }
-
-                    if (nameForms.any { isConfirmation(it) }) {
-                        confirm()
-                        return@execute
-                    }
-
-                    rankNewName(nameForms)
+                    )
                 } else {
                     val nameForms = recognizeNameForms(audio)
 
@@ -346,14 +341,22 @@ class CarVoiceController(
             .any { word ->
                 word in setOf(
                     "otkazi",
+                    "odkazi",
+                    "otkaz",
+                    "otkaze",
                     "odustani",
                     "ponisti",
-                    "prekini"
+                    "prekini",
+                    "stop"
                 ) ||
                     editDistanceAtMostOne(
                         word,
                         "otkazi"
-                    )
+                    ) ||
+                    SerbianPhonetics.similarity(
+                        word,
+                        "otkazi"
+                    ) >= 0.72
             }
     }
 
