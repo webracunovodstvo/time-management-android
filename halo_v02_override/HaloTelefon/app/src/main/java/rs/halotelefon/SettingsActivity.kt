@@ -294,7 +294,7 @@ class SettingsActivity : Activity(),
         )
         heardValue = detailRow(
             diagCard,
-            "Prepoznato"
+            "Prepoznato ime"
         )
         debugValue = detailRow(
             diagCard,
@@ -309,7 +309,7 @@ class SettingsActivity : Activity(),
 
         root.addView(TextView(this).apply {
             text =
-                "v0.16  •  instant wake trening • lokalno • bez INTERNET dozvole"
+                "v0.17  •  stabilan wake → ime prelaz • lokalno • bez INTERNET dozvole"
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(muted)
