@@ -268,7 +268,7 @@ class CandidateActivity : Activity(),
         root.addView(
             TextView(this).apply {
                 text =
-                    "ZOVI / MOŽE / OK  •  drugo ime  •  OTKAŽI"
+                    "ZOVI / MOŽE / OK / OTKAŽI  •  HALO TELEFON = NOVO IME"
                 textSize = 18f
                 setTextColor(green)
                 setTypeface(
@@ -490,7 +490,7 @@ class CandidateActivity : Activity(),
                 card.addView(
                     TextView(this).apply {
                         text =
-                            "✓ IZABRAN  •  čeka potvrdu"
+                            "✓ IZABRAN  •  čeka samo potvrdu / otkazivanje"
                         textSize = 14f
                         setTextColor(accent)
                         setTypeface(
