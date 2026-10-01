@@ -30,6 +30,10 @@ class CandidateActivity : Activity(),
         const val EXTRA_SELECTED_INDEX = "selectedIndex"
         const val ACTION_CLOSE_PICKER =
             "rs.halotelefon.CLOSE_PICKER"
+        const val ACTION_VOICE_SELECTION =
+            "rs.halotelefon.VOICE_SELECTION"
+        const val EXTRA_VOICE_INDEX =
+            "voiceSelectionIndex"
     }
 
     private val bg = Color.rgb(247, 247, 252)
@@ -58,11 +62,27 @@ class CandidateActivity : Activity(),
                 context: Context?,
                 intent: Intent?
             ) {
-                if (
-                    intent?.action ==
-                    ACTION_CLOSE_PICKER
-                ) {
-                    finishAndRemoveTask()
+                when (intent?.action) {
+                    ACTION_CLOSE_PICKER -> {
+                        finishAndRemoveTask()
+                    }
+
+                    ACTION_VOICE_SELECTION -> {
+                        val index =
+                            intent.getIntExtra(
+                                EXTRA_VOICE_INDEX,
+                                -1
+                            )
+
+                        if (
+                            index in names.indices
+                        ) {
+                            selectedIndex = index
+                            runOnUiThread {
+                                render()
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -93,7 +113,14 @@ class CandidateActivity : Activity(),
         window.navigationBarColor = bg
 
         val filter =
-            IntentFilter(ACTION_CLOSE_PICKER)
+            IntentFilter().apply {
+                addAction(
+                    ACTION_CLOSE_PICKER
+                )
+                addAction(
+                    ACTION_VOICE_SELECTION
+                )
+            }
 
         if (Build.VERSION.SDK_INT >= 33) {
             registerReceiver(
@@ -268,7 +295,11 @@ class CandidateActivity : Activity(),
         root.addView(
             TextView(this).apply {
                 text =
-                    "ZOVI / MOŽE / OK / OTKAŽI  •  HALO TELEFON = NOVO IME"
+                    if (names.size > 1) {
+                        "RECI PRVI / DRUGI / TREĆI / ČETVRTI / PETI  •  OTKAŽI"
+                    } else {
+                        "ZOVI / MOŽE / OK / OTKAŽI  •  HALO TELEFON = NOVO IME"
+                    }
                 textSize = 18f
                 setTextColor(green)
                 setTypeface(
@@ -490,7 +521,7 @@ class CandidateActivity : Activity(),
                 card.addView(
                     TextView(this).apply {
                         text =
-                            "✓ IZABRAN  •  čeka samo potvrdu / otkazivanje"
+                            "✓ IZABRAN  •  reci ZOVI / MOŽE / OK ili OTKAŽI"
                         textSize = 14f
                         setTextColor(accent)
                         setTypeface(
