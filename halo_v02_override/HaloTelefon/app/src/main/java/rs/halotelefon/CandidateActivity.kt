@@ -28,21 +28,28 @@ class CandidateActivity : Activity(),
         const val EXTRA_USES = "uses"
         const val EXTRA_SCORES = "scores"
         const val EXTRA_SELECTED_INDEX = "selectedIndex"
+
         const val ACTION_CLOSE_PICKER =
             "rs.halotelefon.CLOSE_PICKER"
+
         const val ACTION_VOICE_SELECTION =
             "rs.halotelefon.VOICE_SELECTION"
+
         const val EXTRA_VOICE_INDEX =
             "voiceSelectionIndex"
     }
 
-    private val bg = Color.rgb(247, 247, 252)
-    private val ink = Color.rgb(31, 31, 36)
-    private val muted = Color.rgb(104, 104, 116)
-    private val accent = Color.rgb(103, 80, 164)
-    private val accentSoft = Color.rgb(238, 232, 255)
-    private val green = Color.rgb(24, 121, 78)
-    private val greenSoft = Color.rgb(229, 247, 237)
+    private val bg = Color.rgb(245, 247, 251)
+    private val surface = Color.WHITE
+    private val ink = Color.rgb(17, 24, 39)
+    private val muted = Color.rgb(107, 114, 128)
+    private val line = Color.rgb(229, 231, 235)
+    private val accent = Color.rgb(79, 70, 229)
+    private val accentSoft = Color.rgb(238, 242, 255)
+    private val green = Color.rgb(5, 150, 105)
+    private val greenSoft = Color.rgb(236, 253, 245)
+    private val red = Color.rgb(185, 28, 28)
+    private val redSoft = Color.rgb(254, 242, 242)
 
     private lateinit var prefs: SharedPreferences
     private lateinit var statusOverlay: TextView
@@ -63,9 +70,8 @@ class CandidateActivity : Activity(),
                 intent: Intent?
             ) {
                 when (intent?.action) {
-                    ACTION_CLOSE_PICKER -> {
+                    ACTION_CLOSE_PICKER ->
                         finishAndRemoveTask()
-                    }
 
                     ACTION_VOICE_SELECTION -> {
                         val index =
@@ -74,9 +80,7 @@ class CandidateActivity : Activity(),
                                 -1
                             )
 
-                        if (
-                            index in names.indices
-                        ) {
+                        if (index in names.indices) {
                             selectedIndex = index
                             runOnUiThread {
                                 render()
@@ -109,17 +113,14 @@ class CandidateActivity : Activity(),
         window.addFlags(
             WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
         )
+
         window.statusBarColor = bg
         window.navigationBarColor = bg
 
         val filter =
             IntentFilter().apply {
-                addAction(
-                    ACTION_CLOSE_PICKER
-                )
-                addAction(
-                    ACTION_VOICE_SELECTION
-                )
+                addAction(ACTION_CLOSE_PICKER)
+                addAction(ACTION_VOICE_SELECTION)
             }
 
         if (Build.VERSION.SDK_INT >= 33) {
@@ -212,11 +213,10 @@ class CandidateActivity : Activity(),
 
         val root =
             LinearLayout(this).apply {
-                orientation =
-                    LinearLayout.VERTICAL
+                orientation = LinearLayout.VERTICAL
                 setPadding(
                     dp(18),
-                    dp(20),
+                    dp(18),
                     dp(18),
                     dp(26)
                 )
@@ -224,94 +224,142 @@ class CandidateActivity : Activity(),
 
         scroll.addView(root)
 
-        statusOverlay =
+        val topRow =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+
+        topRow.addView(
             TextView(this).apply {
-                textSize = 23f
+                text = "☎"
+                textSize = 19f
                 gravity = Gravity.CENTER
-                setTypeface(
-                    typeface,
-                    Typeface.BOLD
-                )
-                setTextColor(accent)
-                setPadding(
-                    dp(14),
-                    dp(16),
-                    dp(14),
-                    dp(16)
-                )
-                background =
-                    rounded(
-                        accentSoft,
-                        20f
-                    )
-            }
-
-        root.addView(
-            statusOverlay,
+                setTextColor(Color.WHITE)
+                background = rounded(accent, 15f)
+            },
             LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
-                bottomMargin = dp(18)
-            }
+                dp(44),
+                dp(44)
+            )
         )
 
-        refreshStatusOverlay()
+        val titleWrap =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), 0, 0, 0)
+            }
 
-        root.addView(
+        titleWrap.addView(
             TextView(this).apply {
-                text = "Potvrdi kontakt"
-                textSize = 29f
+                text = "Koga zovemo?"
+                textSize = 26f
                 setTextColor(ink)
-                setTypeface(
-                    typeface,
-                    Typeface.BOLD
-                )
+                setTypeface(typeface, Typeface.BOLD)
             }
         )
 
-        root.addView(
+        titleWrap.addView(
             TextView(this).apply {
                 text =
                     if (spoken.isBlank()) {
                         "Izaberi kontakt."
                     } else {
-                        "Prepoznato: „" +
-                            spoken +
-                            "“"
+                        "Čuo sam: „$spoken“"
                     }
-
-                textSize = 15f
+                textSize = 13f
                 setTextColor(muted)
+                setPadding(0, dp(2), 0, 0)
+            }
+        )
+
+        topRow.addView(
+            titleWrap,
+            LinearLayout.LayoutParams(
+                0,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                1f
+            )
+        )
+
+        root.addView(topRow)
+
+        statusOverlay =
+            TextView(this).apply {
+                textSize = 13f
+                gravity = Gravity.CENTER
+                setTypeface(typeface, Typeface.BOLD)
+                setTextColor(accent)
                 setPadding(
-                    0,
-                    dp(6),
-                    0,
-                    dp(8)
+                    dp(12),
+                    dp(9),
+                    dp(12),
+                    dp(9)
                 )
+                background = rounded(
+                    accentSoft,
+                    99f
+                )
+            }
+
+        root.addView(
+            statusOverlay,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = dp(14)
+                bottomMargin = dp(12)
+            }
+        )
+
+        refreshStatusOverlay()
+
+        val voiceHint =
+            LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(
+                    dp(16),
+                    dp(13),
+                    dp(16),
+                    dp(13)
+                )
+                background = rounded(
+                    greenSoft,
+                    18f
+                )
+            }
+
+        voiceHint.addView(
+            TextView(this).apply {
+                text =
+                    if (names.size > 1) {
+                        "Reci PRVI, DRUGI, TREĆI, ČETVRTI ili PETI"
+                    } else {
+                        "Reci ZOVI, MOŽE ili OK"
+                    }
+                textSize = 14.5f
+                setTextColor(green)
+                setTypeface(typeface, Typeface.BOLD)
+            }
+        )
+
+        voiceHint.addView(
+            TextView(this).apply {
+                text = "Za prekid uvek možeš da kažeš OTKAŽI."
+                textSize = 12.5f
+                setTextColor(Color.rgb(4, 120, 87))
+                setPadding(0, dp(3), 0, 0)
             }
         )
 
         root.addView(
-            TextView(this).apply {
-                text =
-                    if (names.size > 1) {
-                        "RECI PRVI / DRUGI / TREĆI / ČETVRTI / PETI  •  OTKAŽI"
-                    } else {
-                        "ZOVI / MOŽE / OK / OTKAŽI  •  HALO TELEFON = NOVO IME"
-                    }
-                textSize = 18f
-                setTextColor(green)
-                setTypeface(
-                    typeface,
-                    Typeface.BOLD
-                )
-                setPadding(
-                    0,
-                    dp(3),
-                    0,
-                    dp(16)
-                )
+            voiceHint,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = dp(14)
             }
         )
 
@@ -326,7 +374,6 @@ class CandidateActivity : Activity(),
                 scores.getOrNull(index) ?: 0.0
 
             val name = names[index]
-
             val number =
                 numbers.getOrNull(index)
                     .orEmpty()
@@ -337,25 +384,20 @@ class CandidateActivity : Activity(),
 
             val card =
                 LinearLayout(this).apply {
-                    orientation =
-                        LinearLayout.VERTICAL
-                    gravity =
-                        Gravity.CENTER_VERTICAL
+                    orientation = LinearLayout.VERTICAL
                     setPadding(
-                        dp(18),
+                        dp(16),
                         dp(15),
-                        dp(18),
-                        dp(15)
+                        dp(16),
+                        dp(14)
                     )
-
                     background =
                         candidateBackground(
                             isSelected
                         )
-
                     elevation =
                         if (isSelected) {
-                            dp(5).toFloat()
+                            dp(4).toFloat()
                         } else {
                             dp(1).toFloat()
                         }
@@ -376,24 +418,18 @@ class CandidateActivity : Activity(),
                     }
                 }
 
-            val top =
+            val head =
                 LinearLayout(this).apply {
-                    orientation =
-                        LinearLayout.HORIZONTAL
-                    gravity =
-                        Gravity.CENTER_VERTICAL
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
                 }
 
-            top.addView(
+            head.addView(
                 TextView(this).apply {
-                    text =
-                        (index + 1).toString()
-                    textSize = 20f
+                    text = (index + 1).toString()
+                    textSize = 18f
                     gravity = Gravity.CENTER
-                    setTypeface(
-                        typeface,
-                        Typeface.BOLD
-                    )
+                    setTypeface(typeface, Typeface.BOLD)
                     setTextColor(
                         if (isSelected) {
                             Color.WHITE
@@ -401,38 +437,54 @@ class CandidateActivity : Activity(),
                             accent
                         }
                     )
-                    background =
-                        rounded(
-                            if (isSelected) {
-                                accent
-                            } else {
-                                accentSoft
-                            },
-                            99f
-                        )
+                    background = rounded(
+                        if (isSelected) {
+                            accent
+                        } else {
+                            accentSoft
+                        },
+                        99f
+                    )
                 },
                 LinearLayout.LayoutParams(
-                    dp(46),
-                    dp(46)
+                    dp(42),
+                    dp(42)
                 )
             )
 
-            top.addView(
+            val nameWrap =
+                LinearLayout(this).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(12), 0, 0, 0)
+                }
+
+            nameWrap.addView(
                 TextView(this).apply {
                     text = name
-                    textSize = 23f
+                    textSize = 20f
                     setTextColor(ink)
-                    setTypeface(
-                        typeface,
-                        Typeface.BOLD
-                    )
-                    setPadding(
-                        dp(14),
-                        0,
-                        0,
-                        0
-                    )
-                },
+                    setTypeface(typeface, Typeface.BOLD)
+                }
+            )
+
+            nameWrap.addView(
+                TextView(this).apply {
+                    text =
+                        when (index) {
+                            0 -> "Reci „prvi“"
+                            1 -> "Reci „drugi“"
+                            2 -> "Reci „treći“"
+                            3 -> "Reci „četvrti“"
+                            else -> "Reci „peti“"
+                        }
+                    textSize = 12.5f
+                    setTextColor(accent)
+                    setPadding(0, dp(2), 0, 0)
+                }
+            )
+
+            head.addView(
+                nameWrap,
                 LinearLayout.LayoutParams(
                     0,
                     ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -440,41 +492,34 @@ class CandidateActivity : Activity(),
                 )
             )
 
-            card.addView(top)
+            if (isSelected) {
+                head.addView(
+                    TextView(this).apply {
+                        text = "IZABRAN"
+                        textSize = 10.5f
+                        setTextColor(accent)
+                        setTypeface(typeface, Typeface.BOLD)
+                        setPadding(
+                            dp(9),
+                            dp(5),
+                            dp(9),
+                            dp(5)
+                        )
+                        background = rounded(
+                            accentSoft,
+                            99f
+                        )
+                    }
+                )
+            }
 
-            val frequency =
-                if (usage == 0) {
-                    "Još nije birano"
-                } else {
-                    "Birano " +
-                        usage +
-                        "×"
-                }
-
-            card.addView(
-                TextView(this).apply {
-                    text =
-                        frequency +
-                            "   •   " +
-                            "%.0f".format(
-                                score * 100
-                            ) +
-                            "%"
-
-                    textSize = 14f
-                    setTextColor(muted)
-                    setPadding(
-                        dp(60),
-                        dp(7),
-                        0,
-                        0
-                    )
-                }
-            )
+            card.addView(head)
 
             val details =
                 numberDetails.getOrNull(index)
-                    ?.takeIf { it.isNotBlank() }
+                    ?.takeIf {
+                        it.isNotBlank()
+                    }
                     ?: run {
                         val digits =
                             number.filter(
@@ -489,54 +534,66 @@ class CandidateActivity : Activity(),
                                 number
                             }
 
-                        "✓ Broj: " +
-                            displayNumber
+                        "Broj: $displayNumber"
                     }
 
             card.addView(
                 TextView(this).apply {
                     text = details
-                    textSize = 15f
+                    textSize = 13.5f
                     setTextColor(
-                        if (details.contains("Mobilni")) {
+                        if (
+                            details.contains(
+                                "Mobilni",
+                                true
+                            )
+                        ) {
                             green
                         } else {
-                            ink
+                            muted
                         }
                     )
-                    setTypeface(
-                        typeface,
-                        Typeface.BOLD
-                    )
                     setPadding(
-                        dp(60),
-                        dp(8),
+                        dp(54),
+                        dp(9),
                         0,
                         0
                     )
                 }
             )
 
-            if (isSelected) {
-                card.addView(
-                    TextView(this).apply {
-                        text =
-                            "✓ IZABRAN  •  reci ZOVI / MOŽE / OK ili OTKAŽI"
-                        textSize = 14f
-                        setTextColor(accent)
-                        setTypeface(
-                            typeface,
-                            Typeface.BOLD
+            val usageText =
+                if (usage <= 0) {
+                    "Nije ranije biran"
+                } else {
+                    "Biran $usage×"
+                }
+
+            card.addView(
+                TextView(this).apply {
+                    text =
+                        usageText +
+                            "   •   podudaranje " +
+                            "%.0f".format(
+                                score * 100
+                            ) +
+                            "%"
+                    textSize = 11.5f
+                    setTextColor(
+                        Color.rgb(
+                            156,
+                            163,
+                            175
                         )
-                        setPadding(
-                            dp(60),
-                            dp(8),
-                            0,
-                            0
-                        )
-                    }
-                )
-            }
+                    )
+                    setPadding(
+                        dp(54),
+                        dp(5),
+                        0,
+                        0
+                    )
+                }
+            )
 
             root.addView(
                 card,
@@ -544,7 +601,7 @@ class CandidateActivity : Activity(),
                     ViewGroup.LayoutParams.MATCH_PARENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
                 ).apply {
-                    bottomMargin = dp(11)
+                    bottomMargin = dp(10)
                 }
             )
         }
@@ -553,13 +610,13 @@ class CandidateActivity : Activity(),
             Button(this).apply {
                 text = "Otkaži"
                 isAllCaps = false
-                textSize = 16f
-                setTextColor(muted)
-                background =
-                    rounded(
-                        Color.WHITE,
-                        18f
-                    )
+                textSize = 15f
+                setTypeface(typeface, Typeface.BOLD)
+                setTextColor(red)
+                background = rounded(
+                    redSoft,
+                    17f
+                )
                 setOnClickListener {
                     cancelInteraction()
                 }
@@ -592,19 +649,19 @@ class CandidateActivity : Activity(),
                     "TRAŽIM KONTAKT",
                     true
                 ) ->
-                    "TRAŽIM KONTAKT… SAČEKAJ"
+                    "Tražim kontakt…"
 
                 raw.contains(
                     "PREPOZNAJEM",
                     true
                 ) ->
-                    "PREPOZNAJEM… SAČEKAJ"
+                    "Prepoznajem…"
 
                 raw.contains(
                     "SLUŠAM",
                     true
                 ) ->
-                    "SLUŠAM…"
+                    "Slušam…"
 
                 raw.contains(
                     "Proveravam",
@@ -614,13 +671,13 @@ class CandidateActivity : Activity(),
                         "PROVERAVAM",
                         true
                     ) ->
-                    "PROVERAVAM KOMANDU…"
+                    "Proveravam komandu…"
 
                 raw.contains(
                     "IZABERI",
                     true
                 ) ->
-                    "IZABERI KONTAKT GLASOM"
+                    "Čekam glasovni izbor"
 
                 raw.contains(
                     "OZNAČEN",
@@ -630,16 +687,16 @@ class CandidateActivity : Activity(),
                         "Izabrano",
                         true
                     ) ->
-                    "ČEKAM POTVRDU"
+                    "Čekam potvrdu poziva"
 
                 raw.contains(
                     "Pozivam",
                     true
                 ) ->
-                    raw.uppercase()
+                    raw
 
                 else ->
-                    "ČEKAM POTVRDU"
+                    "Čekam glasovnu komandu"
             }
     }
 
@@ -705,19 +762,23 @@ class CandidateActivity : Activity(),
         GradientDrawable().apply {
             setColor(
                 if (selected) {
-                    accentSoft
+                    Color.rgb(
+                        250,
+                        250,
+                        255
+                    )
                 } else {
-                    Color.WHITE
+                    surface
                 }
             )
 
             cornerRadius =
-                dp(22).toFloat()
+                dp(20).toFloat()
 
             setStroke(
                 dp(
                     if (selected) {
-                        4
+                        2
                     } else {
                         1
                     }
@@ -725,11 +786,7 @@ class CandidateActivity : Activity(),
                 if (selected) {
                     accent
                 } else {
-                    Color.rgb(
-                        228,
-                        228,
-                        234
-                    )
+                    line
                 }
             )
         }
@@ -741,8 +798,7 @@ class CandidateActivity : Activity(),
         GradientDrawable().apply {
             setColor(color)
             cornerRadius =
-                dp(radiusDp.toInt())
-                    .toFloat()
+                dp(radiusDp.toInt()).toFloat()
         }
 
     private fun dp(value: Int): Int =
@@ -750,7 +806,7 @@ class CandidateActivity : Activity(),
             value *
                 resources.displayMetrics.density +
                 0.5f
-            ).toInt()
+        ).toInt()
 
     override fun onSharedPreferenceChanged(
         sharedPreferences: SharedPreferences?,
