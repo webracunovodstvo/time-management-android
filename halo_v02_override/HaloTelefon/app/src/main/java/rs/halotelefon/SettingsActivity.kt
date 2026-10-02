@@ -409,7 +409,7 @@ class SettingsActivity : Activity(),
     private fun detailRow(
         parent: LinearLayout,
         title: String,
-        reuse: TextView? = null
+        reuse: TextView?
     ): TextView {
         parent.addView(
             TextView(this).apply {
