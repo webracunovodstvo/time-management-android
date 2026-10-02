@@ -114,7 +114,7 @@ class MainActivity : Activity(),
 
         titleWrap.addView(
             TextView(this).apply {
-                text = "Glasovno pozivanje bez dodirivanja ekrana"
+                text = "Halo telefon → ime → lista → dodir za poziv"
                 textSize = 13f
                 setTextColor(muted)
                 setPadding(0, dp(2), 0, 0)
@@ -287,8 +287,8 @@ class MainActivity : Activity(),
         )
 
         guide.addView(stepRow("1", "Reci „Halo telefon“", "Aktivira slušanje imena."))
-        guide.addView(stepRow("2", "Izgovori ime", "Aplikacija pronalazi najbolje kontakte."))
-        guide.addView(stepRow("3", "Reci „prvi“, „drugi“…", "Ili reci „otkaži“ u bilo kom trenutku."))
+        guide.addView(stepRow("2", "Reci samo ime", "Na primer: „Petar“."))
+        guide.addView(stepRow("3", "Skroluj i dodirni kontakt", "Dodir odmah pokreće poziv."))
 
         root.addView(
             guide,
@@ -312,7 +312,7 @@ class MainActivity : Activity(),
 
         root.addView(
             TextView(this).apply {
-                text = "v0.22"
+                text = "v0.23"
                 textSize = 12f
                 gravity = Gravity.CENTER
                 setTextColor(Color.rgb(156, 163, 175))
@@ -446,7 +446,7 @@ class MainActivity : Activity(),
         }
 
         return when {
-            raw.contains("TRAŽIM KONTAKT", true) ->
+            raw.contains("TRAŽIM", true) ->
                 "Tražim kontakt…"
 
             raw.contains("PREPOZNAJEM", true) ->
@@ -460,17 +460,8 @@ class MainActivity : Activity(),
                 raw.contains("Posle tona", true) ->
                 "Reci ime"
 
-            raw.contains("PROVERAVAM", true) ||
-                raw.contains("Proveravam", true) ->
-                "Proveravam komandu…"
-
-            raw.contains("IZABERI", true) ->
+            raw.contains("Lista je otvorena", true) ->
                 "Izaberi kontakt"
-
-            raw.contains("OZNAČEN", true) ||
-                raw.contains("Izabrano", true) ||
-                raw.contains("ZOVI /", true) ->
-                "Čekam potvrdu"
 
             raw.contains("Pozivam", true) ->
                 raw
