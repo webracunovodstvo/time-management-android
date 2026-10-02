@@ -163,6 +163,17 @@ class AcousticCommandStore(context: Context) {
 
                 val distance =
                     when {
+                        command == LearnedVoiceCommand.CANCEL &&
+                            distances.size >= 3 ->
+                            distances[0] * 0.72 +
+                                distances[1] * 0.20 +
+                                distances[2] * 0.08
+
+                        command == LearnedVoiceCommand.CANCEL &&
+                            distances.size == 2 ->
+                            distances[0] * 0.78 +
+                                distances[1] * 0.22
+
                         distances.size >= 3 ->
                             distances[0] * 0.58 +
                                 distances[1] * 0.29 +
@@ -192,11 +203,68 @@ class AcousticCommandStore(context: Context) {
                     command = command,
                     distance = distance,
                     threshold = threshold(list),
-                    durationOk = ratio in 0.45..2.10
+                    durationOk =
+                        if (command == LearnedVoiceCommand.CANCEL) {
+                            ratio in 0.35..2.60
+                        } else {
+                            ratio in 0.45..2.10
+                        }
                 )
             }
                 .filter { it.durationOk }
                 .sortedBy { it.distance }
+
+        val cancel =
+            candidates.firstOrNull {
+                it.command ==
+                    LearnedVoiceCommand.CANCEL
+            }
+
+        if (cancel != null) {
+            val bestOther =
+                candidates.firstOrNull {
+                    it.command !=
+                        LearnedVoiceCommand.CANCEL
+                }
+
+            // OTKAŽI is the escape/safety command. Prefer a trained cancel
+            // sample when it is reasonably close, even if an ordinal is only
+            // marginally closer. A false cancel is safer than a false call.
+            val cancelThreshold =
+                max(
+                    1.02,
+                    cancel.threshold * 1.12
+                ).coerceAtMost(1.22)
+
+            val cancelWins =
+                cancel.distance <= cancelThreshold &&
+                    (
+                        bestOther == null ||
+                            cancel.distance <=
+                            bestOther.distance + 0.025
+                    )
+
+            if (cancelWins) {
+                val confidence =
+                    (
+                        (1.0 -
+                            cancel.distance /
+                            (cancelThreshold * 1.20)) *
+                            100.0
+                    )
+                        .toInt()
+                        .coerceIn(1, 100)
+
+                return Match(
+                    command =
+                        LearnedVoiceCommand.CANCEL,
+                    matched = true,
+                    distance = cancel.distance,
+                    threshold = cancelThreshold,
+                    confidence = confidence
+                )
+            }
+        }
 
         val winner =
             candidates.firstOrNull()
