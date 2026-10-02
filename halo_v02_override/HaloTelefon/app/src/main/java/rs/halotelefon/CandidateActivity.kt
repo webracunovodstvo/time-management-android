@@ -24,6 +24,14 @@ class CandidateActivity : Activity() {
 
         const val ACTION_CLOSE_PICKER =
             "rs.halotelefon.CLOSE_PICKER"
+
+        // Kept for source compatibility with older service code. v0.23 does
+        // not use voice selection anymore.
+        const val ACTION_VOICE_SELECTION =
+            "rs.halotelefon.VOICE_SELECTION"
+
+        const val EXTRA_VOICE_INDEX =
+            "voiceSelectionIndex"
     }
 
     private val bg = Color.rgb(245, 247, 251)
@@ -61,6 +69,15 @@ class CandidateActivity : Activity() {
         window.statusBarColor = bg
         window.navigationBarColor = bg
 
+        loadIntent()
+        render()
+    }
+
+    override fun onNewIntent(
+        intent: android.content.Intent
+    ) {
+        super.onNewIntent(intent)
+        setIntent(intent)
         loadIntent()
         render()
     }
