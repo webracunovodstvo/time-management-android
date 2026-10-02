@@ -1,10 +1,10 @@
 package rs.halotelefon
 
-import android.Manifest
 import android.app.Activity
-import android.app.NotificationManager
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
+import android.content.IntentFilter
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -28,8 +28,6 @@ class CandidateActivity : Activity() {
         const val ACTION_CLOSE_PICKER =
             "rs.halotelefon.CLOSE_PICKER"
 
-        // Kept for source compatibility with older service code. v0.23 does
-        // not use voice selection anymore.
         const val ACTION_VOICE_SELECTION =
             "rs.halotelefon.VOICE_SELECTION"
 
@@ -45,6 +43,7 @@ class CandidateActivity : Activity() {
     private val accent = Color.rgb(79, 70, 229)
     private val accentSoft = Color.rgb(238, 242, 255)
     private val green = Color.rgb(5, 150, 105)
+    private val greenSoft = Color.rgb(236, 253, 245)
 
     private var spoken: String = ""
     private var names = arrayListOf<String>()
@@ -52,7 +51,22 @@ class CandidateActivity : Activity() {
     private var numberDetails = arrayListOf<String>()
     private var keys = arrayListOf<String>()
     private var sessionId: String = ""
-    @Volatile private var callStarted = false
+    private var selectedIndex: Int = -1
+
+    private val closeReceiver =
+        object : BroadcastReceiver() {
+            override fun onReceive(
+                context: Context?,
+                intent: Intent?
+            ) {
+                if (
+                    intent?.action ==
+                    ACTION_CLOSE_PICKER
+                ) {
+                    finishAndRemoveTask()
+                }
+            }
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -74,13 +88,30 @@ class CandidateActivity : Activity() {
         window.statusBarColor = bg
         window.navigationBarColor = bg
 
+        val filter =
+            IntentFilter(
+                ACTION_CLOSE_PICKER
+            )
+
+        if (Build.VERSION.SDK_INT >= 33) {
+            registerReceiver(
+                closeReceiver,
+                filter,
+                Context.RECEIVER_NOT_EXPORTED
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(
+                closeReceiver,
+                filter
+            )
+        }
+
         loadIntent()
         render()
     }
 
-    override fun onNewIntent(
-        intent: android.content.Intent
-    ) {
+    override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         loadIntent()
@@ -118,10 +149,12 @@ class CandidateActivity : Activity() {
                 EXTRA_SESSION_ID
             ).orEmpty()
 
-        callStarted = false
+        selectedIndex = -1
     }
 
-    private fun render() {
+    private fun render(
+        restoreScrollY: Int = 0
+    ) {
         if (names.isEmpty()) {
             finish()
             return
@@ -135,7 +168,8 @@ class CandidateActivity : Activity() {
 
         val root =
             LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
+                orientation =
+                    LinearLayout.VERTICAL
                 setPadding(
                     dp(18),
                     dp(18),
@@ -148,8 +182,10 @@ class CandidateActivity : Activity() {
 
         val top =
             LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                gravity = Gravity.CENTER_VERTICAL
+                orientation =
+                    LinearLayout.HORIZONTAL
+                gravity =
+                    Gravity.CENTER_VERTICAL
             }
 
         top.addView(
@@ -158,10 +194,11 @@ class CandidateActivity : Activity() {
                 textSize = 20f
                 gravity = Gravity.CENTER
                 setTextColor(Color.WHITE)
-                background = rounded(
-                    accent,
-                    16f
-                )
+                background =
+                    rounded(
+                        accent,
+                        16f
+                    )
             },
             LinearLayout.LayoutParams(
                 dp(46),
@@ -171,8 +208,14 @@ class CandidateActivity : Activity() {
 
         val titleWrap =
             LinearLayout(this).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(12), 0, 0, 0)
+                orientation =
+                    LinearLayout.VERTICAL
+                setPadding(
+                    dp(12),
+                    0,
+                    0,
+                    0
+                )
             }
 
         titleWrap.addView(
@@ -203,7 +246,12 @@ class CandidateActivity : Activity() {
                         }
                 textSize = 13f
                 setTextColor(muted)
-                setPadding(0, dp(2), 0, 0)
+                setPadding(
+                    0,
+                    dp(2),
+                    0,
+                    0
+                )
             }
         )
 
@@ -220,7 +268,18 @@ class CandidateActivity : Activity() {
 
         root.addView(
             TextView(this).apply {
-                text = "Skroluj i dodirni kontakt koji želiš da pozoveš."
+                text =
+                    if (
+                        selectedIndex in
+                        names.indices
+                    ) {
+                        "Izabran je „" +
+                            names[selectedIndex] +
+                            "“. Reci OKEJ za poziv."
+                    } else {
+                        "Skroluj, dodirni odgovarajući kontakt, pa reci OKEJ."
+                    }
+
                 textSize = 14f
                 setTextColor(green)
                 setTypeface(
@@ -233,10 +292,11 @@ class CandidateActivity : Activity() {
                     dp(14),
                     dp(11)
                 )
-                background = rounded(
-                    Color.rgb(236, 253, 245),
-                    16f
-                )
+                background =
+                    rounded(
+                        greenSoft,
+                        16f
+                    )
             },
             LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -248,38 +308,74 @@ class CandidateActivity : Activity() {
         )
 
         names.indices.forEach { index ->
-            val name = names[index]
+            val selected =
+                index == selectedIndex
+
+            val name =
+                names[index]
+
             val number =
                 numbers.getOrNull(index)
                     .orEmpty()
+
             val details =
-                numberDetails.getOrNull(index)
+                numberDetails
+                    .getOrNull(index)
+                    .orEmpty()
+
+            val key =
+                keys.getOrNull(index)
                     .orEmpty()
 
             val card =
                 LinearLayout(this).apply {
-                    orientation = LinearLayout.HORIZONTAL
-                    gravity = Gravity.CENTER_VERTICAL
+                    orientation =
+                        LinearLayout.HORIZONTAL
+                    gravity =
+                        Gravity.CENTER_VERTICAL
                     setPadding(
                         dp(16),
                         dp(15),
                         dp(16),
                         dp(15)
                     )
-                    background = outlined(
-                        surface,
-                        line,
-                        19f
-                    )
-                    elevation = dp(1).toFloat()
+
+                    background =
+                        candidateBackground(
+                            selected
+                        )
+
+                    elevation =
+                        if (selected) {
+                            dp(4).toFloat()
+                        } else {
+                            dp(1).toFloat()
+                        }
+
                     isClickable = true
                     isFocusable = true
 
                     setOnClickListener {
-                        callContact(
+                        if (
+                            key.isBlank() ||
+                            number.isBlank()
+                        ) {
+                            return@setOnClickListener
+                        }
+
+                        val y =
+                            scroll.scrollY
+
+                        selectedIndex =
+                            index
+
+                        sendSelection(
+                            key,
                             name,
                             number
                         )
+
+                        render(y)
                     }
                 }
 
@@ -291,17 +387,31 @@ class CandidateActivity : Activity() {
                             .firstOrNull()
                             ?.uppercase()
                             ?: "?"
+
                     textSize = 18f
                     gravity = Gravity.CENTER
-                    setTextColor(accent)
                     setTypeface(
                         typeface,
                         Typeface.BOLD
                     )
-                    background = rounded(
-                        accentSoft,
-                        99f
+
+                    setTextColor(
+                        if (selected) {
+                            Color.WHITE
+                        } else {
+                            accent
+                        }
                     )
+
+                    background =
+                        rounded(
+                            if (selected) {
+                                accent
+                            } else {
+                                accentSoft
+                            },
+                            99f
+                        )
                 },
                 LinearLayout.LayoutParams(
                     dp(44),
@@ -311,8 +421,14 @@ class CandidateActivity : Activity() {
 
             val textWrap =
                 LinearLayout(this).apply {
-                    orientation = LinearLayout.VERTICAL
-                    setPadding(dp(12), 0, 0, 0)
+                    orientation =
+                        LinearLayout.VERTICAL
+                    setPadding(
+                        dp(12),
+                        0,
+                        0,
+                        0
+                    )
                 }
 
             textWrap.addView(
@@ -335,9 +451,15 @@ class CandidateActivity : Activity() {
                         } else {
                             details
                         }
+
                     textSize = 12.5f
                     setTextColor(muted)
-                    setPadding(0, dp(4), 0, 0)
+                    setPadding(
+                        0,
+                        dp(4),
+                        0,
+                        0
+                    )
                 }
             )
 
@@ -352,12 +474,25 @@ class CandidateActivity : Activity() {
 
             card.addView(
                 TextView(this).apply {
-                    text = "Pozovi"
-                    textSize = 13f
-                    setTextColor(accent)
+                    text =
+                        if (selected) {
+                            "IZABRAN"
+                        } else {
+                            "Izaberi"
+                        }
+
+                    textSize = 12f
                     setTypeface(
                         typeface,
                         Typeface.BOLD
+                    )
+
+                    setTextColor(
+                        if (selected) {
+                            accent
+                        } else {
+                            muted
+                        }
                     )
                 }
             )
@@ -379,11 +514,13 @@ class CandidateActivity : Activity() {
                 isAllCaps = false
                 textSize = 15f
                 setTextColor(muted)
-                background = outlined(
-                    surface,
-                    line,
-                    17f
-                )
+                background =
+                    outlined(
+                        surface,
+                        line,
+                        17f
+                    )
+
                 setOnClickListener {
                     finishAndRemoveTask()
                 }
@@ -397,106 +534,87 @@ class CandidateActivity : Activity() {
         )
 
         setContentView(scroll)
+
+        if (restoreScrollY > 0) {
+            scroll.post {
+                scroll.scrollTo(
+                    0,
+                    restoreScrollY
+                )
+            }
+        }
     }
 
-    private fun callContact(
+    private fun sendSelection(
+        key: String,
         name: String,
         number: String
     ) {
-        if (
-            number.isBlank() ||
-            callStarted
-        ) {
-            return
-        }
-
-        if (
-            checkSelfPermission(
-                Manifest.permission.CALL_PHONE
-            ) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            Toast.makeText(
-                this,
-                "Nema dozvole za pozivanje.",
-                Toast.LENGTH_LONG
-            ).show()
-            return
-        }
-
-        val prefs =
-            AppPrefs.prefs(this)
-
-        val consumed =
-            prefs.getString(
-                "last_consumed_call_session",
-                ""
-            ).orEmpty()
-
-        if (
-            sessionId.isNotBlank() &&
-            consumed == sessionId
-        ) {
-            finishAndRemoveTask()
-            return
-        }
-
-        // Mark the list as consumed BEFORE starting Telecom. Even if Android
-        // re-opens the same full-screen intent after a rejected call, this
-        // exact result list can never place a second call.
-        callStarted = true
-
-        if (sessionId.isNotBlank()) {
-            prefs.edit()
-                .putString(
-                    "last_consumed_call_session",
-                    sessionId
-                )
-                .apply()
-        }
-
-        AppPrefs.setLastMatch(
-            this,
-            "Poziv: $name"
-        )
-        AppPrefs.setStatus(
-            this,
-            "Poziv pokrenut. Čekam završetak."
-        )
-
-        getSystemService(
-            NotificationManager::class.java
-        ).cancel(
-            VoiceDialService.CANDIDATE_NOTIFICATION_ID
-        )
-
         startService(
             Intent(
                 this,
                 VoiceDialService::class.java
-            ).setAction(
-                VoiceDialService.ACTION_CALL_STARTED
             )
+                .setAction(
+                    VoiceDialService.ACTION_SELECT_CANDIDATE
+                )
+                .putExtra(
+                    VoiceDialService.EXTRA_LOOKUP_KEY,
+                    key
+                )
+                .putExtra(
+                    VoiceDialService.EXTRA_NAME,
+                    name
+                )
+                .putExtra(
+                    VoiceDialService.EXTRA_NUMBER,
+                    number
+                )
+                .putExtra(
+                    VoiceDialService.EXTRA_SESSION_ID,
+                    sessionId
+                )
+                .putExtra(
+                    VoiceDialService.EXTRA_SPOKEN,
+                    spoken
+                )
         )
-
-        val appContext =
-            applicationContext
-
-        finishAndRemoveTask()
-
-        // Do not block the Activity main thread on Telecom binder work.
-        Thread(
-            {
-                runCatching {
-                    CallPlacer.call(
-                        appContext,
-                        number
-                    )
-                }
-            },
-            "HaloTelefon-PlaceCall"
-        ).start()
     }
+
+    private fun candidateBackground(
+        selected: Boolean
+    ): GradientDrawable =
+        GradientDrawable().apply {
+            setColor(
+                if (selected) {
+                    Color.rgb(
+                        250,
+                        250,
+                        255
+                    )
+                } else {
+                    surface
+                }
+            )
+
+            cornerRadius =
+                dp(19).toFloat()
+
+            setStroke(
+                dp(
+                    if (selected) {
+                        2
+                    } else {
+                        1
+                    }
+                ),
+                if (selected) {
+                    accent
+                } else {
+                    line
+                }
+            )
+        }
 
     private fun maskedNumber(
         raw: String
@@ -504,7 +622,9 @@ class CandidateActivity : Activity() {
         val digits =
             raw.filter(Char::isDigit)
 
-        return if (digits.length > 4) {
+        return if (
+            digits.length > 4
+        ) {
             "Broj: ••• " +
                 digits.takeLast(4)
         } else {
@@ -519,8 +639,9 @@ class CandidateActivity : Activity() {
         GradientDrawable().apply {
             setColor(color)
             cornerRadius =
-                dp(radiusDp.toInt())
-                    .toFloat()
+                dp(
+                    radiusDp.toInt()
+                ).toFloat()
         }
 
     private fun outlined(
@@ -535,14 +656,26 @@ class CandidateActivity : Activity() {
                 stroke
             )
             cornerRadius =
-                dp(radiusDp.toInt())
-                    .toFloat()
+                dp(
+                    radiusDp.toInt()
+                ).toFloat()
         }
 
     private fun dp(value: Int): Int =
         (
             value *
-                resources.displayMetrics.density +
+                resources
+                    .displayMetrics
+                    .density +
                 0.5f
         ).toInt()
+
+    override fun onDestroy() {
+        runCatching {
+            unregisterReceiver(
+                closeReceiver
+            )
+        }
+        super.onDestroy()
+    }
 }
