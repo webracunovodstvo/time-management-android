@@ -288,7 +288,8 @@ class MainActivity : Activity(),
 
         guide.addView(stepRow("1", "Reci „Halo telefon“", "Aktivira slušanje imena."))
         guide.addView(stepRow("2", "Reci samo ime", "Na primer: „Petar“."))
-        guide.addView(stepRow("3", "Skroluj i izaberi kontakt", "Dodir samo označava kontakt."))\n        guide.addView(stepRow("4", "Reci „okej“", "Poziv kreće tek nakon potvrde."))
+        guide.addView(stepRow("3", "Skroluj i izaberi kontakt", "Dodir samo označava kontakt."))
+        guide.addView(stepRow("4", "Reci „okej“", "Poziv kreće tek nakon potvrde."))
 
         root.addView(
             guide,
