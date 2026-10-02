@@ -1918,46 +1918,20 @@ class VoiceDialService : Service() {
     private fun buildShortNamePrompt(
         contacts: List<ContactPhone>
     ): String {
-        val usage =
-            learningStore.statsFor(
-                contacts.map {
-                    it.lookupKey
-                }
-            )
-
-        val ordered =
-            contacts
-                .distinctBy {
-                    SerbianNormalizer.normalize(
-                        it.displayName
-                    )
-                }
-                .sortedWith(
-                    compareByDescending<ContactPhone> {
-                        usage[
-                            it.lookupKey
-                        ]?.totalUses ?: 0
-                    }.thenByDescending {
-                        usage[
-                            it.lookupKey
-                        ]?.lastUsed ?: 0L
-                    }.thenBy {
-                        it.displayName.length
-                    }
-                )
-
         val prefix =
-            "Srpsko lično ime ili ime i prezime iz telefonskog imenika. " +
-                "Piši latinicom. Mogući kontakti: "
+            "Jedno ime osobe iz telefonskog imenika. " +
+                "Odgovori samo imenom. Moguća imena: "
 
-        val builder =
-            StringBuilder(prefix)
+        val tokens =
+            LinkedHashSet<String>()
 
-        for (contact in ordered) {
+        for (contact in contacts) {
             val clean =
                 contact.displayName
                     .replace(
-                        Regex("[#@()\\[\\]{}.,;:_/\\\\|-]+"),
+                        Regex(
+                            "[#@()\\[\\]{}.,;:_/\\\\|-]+"
+                        ),
                         " "
                     )
                     .replace(
@@ -1966,15 +1940,29 @@ class VoiceDialService : Service() {
                     )
                     .trim()
 
-            if (clean.length < 2) {
-                continue
-            }
+            for (token in clean.split(' ')) {
+                val value = token.trim()
 
+                if (
+                    value.length in 2..14 &&
+                    SerbianNormalizer
+                        .normalize(value)
+                        .isNotBlank()
+                ) {
+                    tokens.add(value)
+                }
+            }
+        }
+
+        val builder =
+            StringBuilder(prefix)
+
+        for (token in tokens) {
             if (
                 builder.length +
-                    clean.length +
+                    token.length +
                     2 >
-                1800
+                900
             ) {
                 break
             }
@@ -1986,7 +1974,7 @@ class VoiceDialService : Service() {
                 builder.append(", ")
             }
 
-            builder.append(clean)
+            builder.append(token)
         }
 
         return builder.toString()
