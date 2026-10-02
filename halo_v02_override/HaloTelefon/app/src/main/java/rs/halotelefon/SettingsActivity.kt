@@ -256,7 +256,6 @@ class SettingsActivity : Activity(),
         diagCard.addView(sectionTag("DIJAGNOSTIKA", accentSoft, accent))
         diagCard.addView(sectionTitle("Šta aplikacija vidi"))
 
-        wakeValue = detailRow(diagCard, "Wake profil", wakeValue)
         heardValue = detailRow(diagCard, "Poslednje prepoznato")
         debugValue = detailRow(diagCard, "Obrada")
         matchValue = detailRow(diagCard, "Kontakt")
