@@ -236,7 +236,7 @@ class SettingsActivity : Activity(),
 
         root.addView(
             TextView(this).apply {
-                text = "Halo Telefon  •  v0.23"
+                text = "Halo Telefon  •  v0.24"
                 textSize = 12f
                 gravity = Gravity.CENTER
                 setTextColor(Color.rgb(156, 163, 175))
