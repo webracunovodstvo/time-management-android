@@ -2202,7 +2202,8 @@ class VoiceDialService : Service() {
 
         interactionScreenWakeLock =
             pm.newWakeLock(
-                PowerManager.SCREEN_BRIGHT_WAKE_LOCK,
+                PowerManager.SCREEN_BRIGHT_WAKE_LOCK or
+                    PowerManager.ACQUIRE_CAUSES_WAKEUP,
                 "HaloTelefon:ActiveInteraction"
             ).apply {
                 setReferenceCounted(false)
