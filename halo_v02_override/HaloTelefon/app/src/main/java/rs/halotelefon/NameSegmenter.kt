@@ -6,9 +6,9 @@ import kotlin.math.sqrt
 /**
  * Dedicated capture for a short contact name.
  *
- * V0.4 deliberately never closes a name segment before ~0.9 s. The previous
- * version could stop at 0.36 s, which is too short for Whisper to identify a
- * Serbian name reliably.
+ * v0.22 closes the segment sooner after a real pause. The Serbian-tuned
+ * model needs less padding/context than the old generic model, so this removes
+ * a noticeable delay before contact matching without cutting normal full names.
  */
 class NameSegmenter(
     private val sampleRate: Int = 16_000
@@ -74,9 +74,9 @@ class NameSegmenter(
         if (rms < endThreshold) silenceFrames++ else silenceFrames = 0
 
         val durationSeconds = segment.size.toDouble() / sampleRate
-        val longEnough = durationSeconds >= 0.90
-        val endedBySilence = longEnough && silenceFrames >= 18 // ~360 ms
-        val endedByLength = durationSeconds >= 3.6
+        val longEnough = durationSeconds >= 0.55
+        val endedBySilence = longEnough && silenceFrames >= 11 // ~220 ms
+        val endedByLength = durationSeconds >= 3.2
 
         if (endedBySilence || endedByLength) {
             val out = segment.toFloatArray()
