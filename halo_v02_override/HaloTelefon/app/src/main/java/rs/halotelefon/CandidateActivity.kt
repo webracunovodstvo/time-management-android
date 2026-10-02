@@ -522,7 +522,7 @@ class CandidateActivity : Activity() {
                     )
 
                 setOnClickListener {
-                    finishAndRemoveTask()
+                    cancelSelection()
                 }
             },
             LinearLayout.LayoutParams(
@@ -579,6 +579,25 @@ class CandidateActivity : Activity() {
                     spoken
                 )
         )
+    }
+
+    private fun cancelSelection() {
+        startService(
+            Intent(
+                this,
+                VoiceDialService::class.java
+            ).setAction(
+                VoiceDialService.ACTION_CANCEL_INTERACTION
+            )
+        )
+        finishAndRemoveTask()
+    }
+
+    @Deprecated(
+        "Use OnBackPressedDispatcher on newer API"
+    )
+    override fun onBackPressed() {
+        cancelSelection()
     }
 
     private fun candidateBackground(
