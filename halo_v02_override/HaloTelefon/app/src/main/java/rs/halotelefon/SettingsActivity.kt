@@ -24,7 +24,6 @@ class SettingsActivity : Activity(),
     private lateinit var prefs: SharedPreferences
     private lateinit var keepAwakeSwitch: Switch
     private lateinit var wakeValue: TextView
-    private lateinit var commandValue: TextView
     private lateinit var heardValue: TextView
     private lateinit var debugValue: TextView
     private lateinit var matchValue: TextView
@@ -72,7 +71,6 @@ class SettingsActivity : Activity(),
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(18), dp(20), dp(30))
         }
-
         scroll.addView(root)
 
         root.addView(
@@ -97,7 +95,7 @@ class SettingsActivity : Activity(),
 
         root.addView(
             TextView(this).apply {
-                text = "Nauči glas aplikaciji i proveri šta trenutno prepoznaje."
+                text = "Jednostavan režim: Halo telefon → ime → lista → dodir za poziv."
                 textSize = 14f
                 setTextColor(muted)
                 setPadding(0, dp(5), 0, dp(18))
@@ -109,15 +107,14 @@ class SettingsActivity : Activity(),
         wakeCard.addView(sectionTitle("Halo telefon"))
         wakeCard.addView(
             sectionText(
-                "Snimi svoj izgovor 5 puta. Ovaj profil se koristi samo za aktiviranje aplikacije."
+                "Snimi svoj izgovor 5 puta. Ovo je jedina glasovna komanda koju aplikacija stalno sluša."
             )
         )
-
         wakeCard.addView(
             primaryButton(
                 "Nauči „Halo telefon“"
             ) {
-                startTraining(
+                startServiceAction(
                     VoiceDialService.ACTION_TRAIN_WAKE
                 )
             },
@@ -126,47 +123,24 @@ class SettingsActivity : Activity(),
 
         wakeValue = infoValue()
         wakeCard.addView(wakeValue)
-
         root.addView(wakeCard, cardParams())
 
-        val commandCard = card()
-        commandCard.addView(sectionTag("GLASOVNI IZBOR", greenSoft, green))
-        commandCard.addView(sectionTitle("Kratke komande"))
-        commandCard.addView(
+        val flowCard = card()
+        flowCard.addView(sectionTag("TOK", greenSoft, green))
+        flowCard.addView(sectionTitle("Kako se koristi"))
+        flowCard.addView(
             sectionText(
-                "Nauči OTKAŽI, PRVI, DRUGI, TREĆI, ČETVRTI i PETI. " +
-                    "Svaku reč izgovori 3 puta, normalnim tempom."
+                "1. Reci „Halo telefon“\n" +
+                    "2. Posle tona reci samo ime, npr. „Petar“\n" +
+                    "3. Skroluj listu\n" +
+                    "4. Dodirni kontakt i poziv kreće odmah"
             )
         )
-
-        commandCard.addView(
-            primaryButton(
-                "Nauči glasovne komande"
-            ) {
-                startTraining(
-                    VoiceDialService.ACTION_TRAIN_COMMANDS
-                )
-            },
-            buttonParams()
-        )
-
-        commandValue = infoValue()
-        commandCard.addView(commandValue)
-
-        commandCard.addView(
-            TextView(this).apply {
-                text = "Savet: reci kratku reč jasno, ali bez razvlačenja. v0.22 prihvata i kraće izgovore."
-                textSize = 12.5f
-                setTextColor(muted)
-                setPadding(0, dp(10), 0, 0)
-            }
-        )
-
-        root.addView(commandCard, cardParams())
+        root.addView(flowCard, cardParams())
 
         val screenCard = card()
         screenCard.addView(sectionTag("EKRAN", accentSoft, accent))
-        screenCard.addView(sectionTitle("Rad tokom glasovne radnje"))
+        screenCard.addView(sectionTitle("Buđenje i prikaz liste"))
 
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -176,7 +150,7 @@ class SettingsActivity : Activity(),
 
         row.addView(
             TextView(this).apply {
-                text = "Drži aplikaciju aktivnom dok biraš kontakt ili potvrđuješ poziv."
+                text = "Probudi ekran na „Halo telefon“ i drži ga uključenim dok biraš kontakt."
                 textSize = 13f
                 setTextColor(muted)
             },
@@ -235,36 +209,34 @@ class SettingsActivity : Activity(),
         testCard.addView(sectionTitle("Prepoznavanje imena"))
         testCard.addView(
             sectionText(
-                "Preskače „Halo telefon“ i odmah sluša ime. Koristi za proveru mikrofona i Whisper prepoznavanja."
+                "Preskače „Halo telefon“ i odmah sluša ime. Koristi samo kada proveravamo tačnost modela."
             )
         )
-
         testCard.addView(
             secondaryButton(
-                "Testiraj ime kontakta"
+                "Testiraj ime"
             ) {
-                startTraining(
+                startServiceAction(
                     VoiceDialService.ACTION_TEST_NAME
                 )
             },
             buttonParams()
         )
-
         root.addView(testCard, cardParams())
 
         val diagCard = card()
         diagCard.addView(sectionTag("DIJAGNOSTIKA", accentSoft, accent))
-        diagCard.addView(sectionTitle("Šta aplikacija vidi"))
+        diagCard.addView(sectionTitle("Poslednja radnja"))
 
-        heardValue = detailRow(diagCard, "Poslednje prepoznato")
+        heardValue = detailRow(diagCard, "Prepoznato ime")
         debugValue = detailRow(diagCard, "Obrada")
-        matchValue = detailRow(diagCard, "Kontakt")
+        matchValue = detailRow(diagCard, "Rezultat")
 
         root.addView(diagCard, cardParams())
 
         root.addView(
             TextView(this).apply {
-                text = "Halo Telefon  •  v0.22"
+                text = "Halo Telefon  •  v0.23"
                 textSize = 12f
                 gravity = Gravity.CENTER
                 setTextColor(Color.rgb(156, 163, 175))
@@ -290,9 +262,7 @@ class SettingsActivity : Activity(),
             background = rounded(fill, 99f)
         }
 
-    private fun sectionTitle(
-        value: String
-    ): TextView =
+    private fun sectionTitle(value: String): TextView =
         TextView(this).apply {
             text = value
             textSize = 20f
@@ -301,9 +271,7 @@ class SettingsActivity : Activity(),
             setPadding(0, dp(10), 0, 0)
         }
 
-    private fun sectionText(
-        value: String
-    ): TextView =
+    private fun sectionText(value: String): TextView =
         TextView(this).apply {
             text = value
             textSize = 13f
@@ -342,20 +310,12 @@ class SettingsActivity : Activity(),
             textSize = 14f
             setTypeface(typeface, Typeface.BOLD)
             setTextColor(ink)
-            background = outlined(
-                surface,
-                line,
-                16f
-            )
+            background = outlined(surface, line, 16f)
             setOnClickListener { action() }
         }
 
-    private fun startTraining(
-        action: String
-    ) {
-        if (!ensurePermissions()) {
-            return
-        }
+    private fun startServiceAction(action: String) {
+        if (!ensurePermissions()) return
 
         val intent =
             Intent(
@@ -378,17 +338,8 @@ class SettingsActivity : Activity(),
     private fun card(): LinearLayout =
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(
-                dp(18),
-                dp(17),
-                dp(18),
-                dp(17)
-            )
-            background = outlined(
-                surface,
-                line,
-                22f
-            )
+            setPadding(dp(18), dp(17), dp(18), dp(17))
+            background = outlined(surface, line, 22f)
             elevation = dp(1).toFloat()
         }
 
@@ -408,8 +359,7 @@ class SettingsActivity : Activity(),
 
     private fun detailRow(
         parent: LinearLayout,
-        title: String,
-        reuse: TextView?
+        title: String
     ): TextView {
         parent.addView(
             TextView(this).apply {
@@ -422,21 +372,12 @@ class SettingsActivity : Activity(),
             }
         )
 
-        return (reuse ?: TextView(this)).also { value ->
+        return TextView(this).also { value ->
             value.textSize = 13.5f
             value.setTextColor(ink)
-
-            if (value.parent == null) {
-                parent.addView(value)
-            }
+            parent.addView(value)
         }
     }
-
-    private fun detailRow(
-        parent: LinearLayout,
-        title: String
-    ): TextView =
-        detailRow(parent, title, null)
 
     private fun refresh() {
         keepAwakeSwitch.isChecked =
@@ -449,12 +390,6 @@ class SettingsActivity : Activity(),
             prefs.getString(
                 AppPrefs.KEY_LAST_WAKE,
                 "Wake profil još nije napravljen"
-            )
-
-        commandValue.text =
-            prefs.getString(
-                AppPrefs.KEY_COMMAND_PROFILE,
-                "Komande još nisu naučene"
             )
 
         heardValue.text =
@@ -472,16 +407,14 @@ class SettingsActivity : Activity(),
         matchValue.text =
             prefs.getString(
                 AppPrefs.KEY_LAST_MATCH,
-                "Još nema izbora"
+                "Još nema rezultata"
             )
 
         refreshFullScreenPermission()
     }
 
     private fun refreshFullScreenPermission() {
-        if (Build.VERSION.SDK_INT < 34) {
-            return
-        }
+        if (Build.VERSION.SDK_INT < 34) return
 
         val manager =
             getSystemService(
@@ -514,7 +447,6 @@ class SettingsActivity : Activity(),
                 "Dozvoli mikrofon, kontakte i pozivanje, pa pokušaj ponovo.",
                 Toast.LENGTH_LONG
             ).show()
-
             return false
         }
 
@@ -527,8 +459,7 @@ class SettingsActivity : Activity(),
     ): GradientDrawable =
         GradientDrawable().apply {
             setColor(color)
-            cornerRadius =
-                dp(radiusDp.toInt()).toFloat()
+            cornerRadius = dp(radiusDp.toInt()).toFloat()
         }
 
     private fun outlined(
@@ -539,8 +470,7 @@ class SettingsActivity : Activity(),
         GradientDrawable().apply {
             setColor(fill)
             setStroke(dp(1), stroke)
-            cornerRadius =
-                dp(radiusDp.toInt()).toFloat()
+            cornerRadius = dp(radiusDp.toInt()).toFloat()
         }
 
     private fun dp(value: Int): Int =
@@ -559,9 +489,7 @@ class SettingsActivity : Activity(),
         sharedPreferences: SharedPreferences?,
         key: String?
     ) {
-        runOnUiThread {
-            refresh()
-        }
+        runOnUiThread { refresh() }
     }
 
     override fun onDestroy() {
