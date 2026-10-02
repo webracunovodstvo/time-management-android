@@ -36,7 +36,7 @@ class VoiceDialService : Service() {
 
         private const val CHANNEL_ID = "halo_voice"
         private const val NOTIFICATION_ID = 1001
-        private const val CANDIDATE_NOTIFICATION_ID = 1002
+        const val CANDIDATE_NOTIFICATION_ID = 1002
         private const val CANDIDATE_CHANNEL_ID = "halo_candidates_v1"
         private const val SAMPLE_RATE = 16_000
     }
@@ -2109,6 +2109,11 @@ class VoiceDialService : Service() {
                     CandidateActivity.EXTRA_KEYS,
                     keys
                 )
+                putExtra(
+                    CandidateActivity.EXTRA_SESSION_ID,
+                    "picker-" +
+                        SystemClock.elapsedRealtimeNanos()
+                )
                 addFlags(
                     Intent.FLAG_ACTIVITY_NEW_TASK or
                         Intent.FLAG_ACTIVITY_CLEAR_TOP or
@@ -2158,12 +2163,22 @@ class VoiceDialService : Service() {
                 )
                 .setAutoCancel(true)
 
+        val pm =
+            getSystemService(
+                PowerManager::class.java
+            )
+
         val canFullScreen =
             Build.VERSION.SDK_INT < 34 ||
                 manager
                     .canUseFullScreenIntent()
 
-        if (canFullScreen) {
+        // Never arm two launch paths for the same picker. v0.23 could both
+        // start the activity directly and deliver its full-screen PendingIntent.
+        if (
+            !pm.isInteractive &&
+            canFullScreen
+        ) {
             builder.setFullScreenIntent(
                 pending,
                 true
@@ -2175,13 +2190,8 @@ class VoiceDialService : Service() {
             builder.build()
         )
 
-        val pm =
-            getSystemService(
-                PowerManager::class.java
-            )
-
-        // "Halo telefon" already wakes the screen. Open the list immediately
-        // so the next user action is only scroll + tap.
+        // When the wake phrase has already turned the screen on, open the list
+        // directly. The notification is only the fallback launch path.
         if (pm.isInteractive) {
             runCatching {
                 startActivity(picker)
