@@ -1448,6 +1448,7 @@ class VoiceDialService : Service() {
     private fun cancelCurrentInteraction(reason: String) {
         selectedContact = null
         selectedSpoken = ""
+        selectedCallSessionId = ""
         pendingCandidates = emptyList()
         nameInferencePending = false
         segmentQueue.clear()
@@ -1482,6 +1483,7 @@ class VoiceDialService : Service() {
     private fun beginFreshNameAfterWake() {
         selectedContact = null
         selectedSpoken = ""
+        selectedCallSessionId = ""
         pendingCandidates = emptyList()
         nameInferencePending = false
         segmentQueue.clear()
@@ -1744,6 +1746,7 @@ class VoiceDialService : Service() {
 
         selectedContact = null
         selectedSpoken = ""
+        selectedCallSessionId = ""
         pendingCandidates = emptyList()
         acquireInteractionScreenLock()
         mode = Mode.WAIT_NAME
