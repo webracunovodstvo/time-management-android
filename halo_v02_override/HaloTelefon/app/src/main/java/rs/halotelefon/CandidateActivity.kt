@@ -415,7 +415,7 @@ class CandidateActivity : Activity() {
         )
         AppPrefs.setStatus(
             this,
-            "Pozivam $name"
+            "ČEKAM: ‘HALO TELEFON’"
         )
 
         CallPlacer.call(
