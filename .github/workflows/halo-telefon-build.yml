@@ -41,6 +41,15 @@ jobs:
           grep -q 'versionName = "0.20.0"' /tmp/halo-src/HaloTelefon/app/build.gradle.kts
           grep -q 'ggml-base-q5_1.bin' /tmp/halo-src/HaloTelefon/scripts/setup.sh
 
+      - name: Save reconstructable source
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd /tmp/halo-src
+          zip -qr "$GITHUB_WORKSPACE/HaloTelefon-v0.20-source.zip" HaloTelefon
+          unzip -t "$GITHUB_WORKSPACE/HaloTelefon-v0.20-source.zip"
+          ls -lh "$GITHUB_WORKSPACE/HaloTelefon-v0.20-source.zip"
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
@@ -83,4 +92,11 @@ jobs:
         with:
           name: HaloTelefon-v0.20-debug-apk
           path: HaloTelefon-v0.20-debug.apk
+          if-no-files-found: error
+
+      - name: Upload source
+        uses: actions/upload-artifact@v4
+        with:
+          name: HaloTelefon-v0.20-source
+          path: HaloTelefon-v0.20-source.zip
           if-no-files-found: error
