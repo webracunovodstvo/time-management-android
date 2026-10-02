@@ -3,7 +3,7 @@ name: Build Halo Telefon APK
 on:
   push:
     branches:
-      - halo-telefon-v021
+      - halo-telefon-v022
     paths:
       - "halo_source_parts/**"
       - "halo_v02_override/**"
@@ -38,17 +38,17 @@ jobs:
           test -f /tmp/halo-src/HaloTelefon/app/src/main/java/rs/halotelefon/WakeTrainingSegmenter.kt
           test -f /tmp/halo-src/HaloTelefon/app/src/main/java/rs/halotelefon/SettingsActivity.kt
           test -f /tmp/halo-src/HaloTelefon/app/src/main/java/rs/halotelefon/AcousticCommandStore.kt
-          grep -q 'versionName = "0.21.0"' /tmp/halo-src/HaloTelefon/app/build.gradle.kts
-          grep -q 'ggml-base-q5_1.bin' /tmp/halo-src/HaloTelefon/scripts/setup.sh
+          grep -q 'versionName = "0.22.0"' /tmp/halo-src/HaloTelefon/app/build.gradle.kts
+          grep -q 'ggml-whisper-small-sr-q5_0.bin' /tmp/halo-src/HaloTelefon/scripts/setup.sh
 
       - name: Save reconstructable source
         shell: bash
         run: |
           set -euo pipefail
           cd /tmp/halo-src
-          zip -qr "$GITHUB_WORKSPACE/HaloTelefon-v0.21-source.zip" HaloTelefon
-          unzip -t "$GITHUB_WORKSPACE/HaloTelefon-v0.21-source.zip"
-          ls -lh "$GITHUB_WORKSPACE/HaloTelefon-v0.21-source.zip"
+          zip -qr "$GITHUB_WORKSPACE/HaloTelefon-v0.22-source.zip" HaloTelefon
+          unzip -t "$GITHUB_WORKSPACE/HaloTelefon-v0.22-source.zip"
+          ls -lh "$GITHUB_WORKSPACE/HaloTelefon-v0.22-source.zip"
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -84,19 +84,19 @@ jobs:
       - name: Collect APK
         shell: bash
         run: |
-          cp /tmp/halo-src/HaloTelefon/app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/HaloTelefon-v0.21-debug.apk"
-          ls -lh "$GITHUB_WORKSPACE/HaloTelefon-v0.21-debug.apk"
+          cp /tmp/halo-src/HaloTelefon/app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/HaloTelefon-v0.22-debug.apk"
+          ls -lh "$GITHUB_WORKSPACE/HaloTelefon-v0.22-debug.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: HaloTelefon-v0.21-debug-apk
-          path: HaloTelefon-v0.21-debug.apk
+          name: HaloTelefon-v0.22-debug-apk
+          path: HaloTelefon-v0.22-debug.apk
           if-no-files-found: error
 
       - name: Upload source
         uses: actions/upload-artifact@v4
         with:
-          name: HaloTelefon-v0.21-source
-          path: HaloTelefon-v0.21-source.zip
+          name: HaloTelefon-v0.22-source
+          path: HaloTelefon-v0.22-source.zip
           if-no-files-found: error
