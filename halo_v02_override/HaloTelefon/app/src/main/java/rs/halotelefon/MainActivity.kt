@@ -302,7 +302,7 @@ class MainActivity : Activity(),
 
         root.addView(
             TextView(this).apply {
-                text = "Sve radi lokalno na telefonu. Glas se ne šalje na internet."
+                text = "Sve radi lokalno na telefonu. Srpski model i imenik ostaju na uređaju."
                 textSize = 12.5f
                 gravity = Gravity.CENTER
                 setTextColor(muted)
@@ -312,7 +312,7 @@ class MainActivity : Activity(),
 
         root.addView(
             TextView(this).apply {
-                text = "v0.21"
+                text = "v0.22"
                 textSize = 12f
                 gravity = Gravity.CENTER
                 setTextColor(Color.rgb(156, 163, 175))
