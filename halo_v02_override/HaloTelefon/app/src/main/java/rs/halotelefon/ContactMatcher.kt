@@ -87,12 +87,6 @@ class ContactMatcher(
         spoken: String,
         displayName: String
     ): Double {
-        var best =
-            combinedSimilarity(
-                spoken,
-                displayName
-            )
-
         val cleanName =
             displayName
                 .replace(
@@ -105,32 +99,66 @@ class ContactMatcher(
                 )
                 .trim()
 
-        val tokens =
+        val nameTokens =
             cleanName
                 .split(' ')
                 .map { it.trim() }
                 .filter { it.length >= 2 }
 
-        for (token in tokens) {
+        val spokenTokens =
+            spoken
+                .replace(
+                    Regex("[#@()\\[\\]{}.,;:_/\\\\|-]+"),
+                    " "
+                )
+                .replace(
+                    Regex("\\s+"),
+                    " "
+                )
+                .trim()
+                .split(' ')
+                .map { it.trim() }
+                .filter { it.length >= 2 }
+
+        var best =
+            combinedSimilarity(
+                spoken,
+                cleanName
+            )
+
+        if (
+            spokenTokens.size >= 2 &&
+            nameTokens.size >= 2
+        ) {
+            // Whisper can occasionally swap first/last name. Compare both
+            // orders, but keep the complete two-word phrase dominant.
+            val reversed =
+                nameTokens
+                    .asReversed()
+                    .joinToString(" ")
+
             best =
                 maxOf(
                     best,
                     combinedSimilarity(
                         spoken,
-                        token
+                        reversed
                     )
                 )
-        }
 
-        if (tokens.size >= 2) {
             for (
                 index in
-                0 until tokens.lastIndex
+                0 until nameTokens.lastIndex
             ) {
                 val pair =
-                    tokens[index] +
+                    nameTokens[index] +
                         " " +
-                        tokens[index + 1]
+                        nameTokens[index + 1]
+
+                val reversePair =
+                    nameTokens[index + 1] +
+                        " " +
+                        nameTokens[index]
 
                 best =
                     maxOf(
@@ -138,6 +166,35 @@ class ContactMatcher(
                         combinedSimilarity(
                             spoken,
                             pair
+                        ),
+                        combinedSimilarity(
+                            spoken,
+                            reversePair
+                        )
+                    )
+            }
+
+            // A perfect first-name-only hit must not beat a much better
+            // full-name match when the user actually said two words.
+            for (token in nameTokens) {
+                best =
+                    maxOf(
+                        best,
+                        combinedSimilarity(
+                            spoken,
+                            token
+                        ).coerceAtMost(0.82)
+                    )
+            }
+        } else {
+            // One spoken word: matching a first name or surname is valid.
+            for (token in nameTokens) {
+                best =
+                    maxOf(
+                        best,
+                        combinedSimilarity(
+                            spoken,
+                            token
                         )
                     )
             }
