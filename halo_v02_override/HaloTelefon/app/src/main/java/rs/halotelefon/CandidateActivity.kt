@@ -2,6 +2,8 @@ package rs.halotelefon
 
 import android.Manifest
 import android.app.Activity
+import android.app.NotificationManager
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
@@ -21,6 +23,7 @@ class CandidateActivity : Activity() {
         const val EXTRA_NUMBERS = "numbers"
         const val EXTRA_NUMBER_DETAILS = "numberDetails"
         const val EXTRA_KEYS = "keys"
+        const val EXTRA_SESSION_ID = "sessionId"
 
         const val ACTION_CLOSE_PICKER =
             "rs.halotelefon.CLOSE_PICKER"
@@ -48,6 +51,8 @@ class CandidateActivity : Activity() {
     private var numbers = arrayListOf<String>()
     private var numberDetails = arrayListOf<String>()
     private var keys = arrayListOf<String>()
+    private var sessionId: String = ""
+    @Volatile private var callStarted = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -107,6 +112,13 @@ class CandidateActivity : Activity() {
             intent.getStringArrayListExtra(
                 EXTRA_KEYS
             ) ?: arrayListOf()
+
+        sessionId =
+            intent.getStringExtra(
+                EXTRA_SESSION_ID
+            ).orEmpty()
+
+        callStarted = false
     }
 
     private fun render() {
@@ -391,7 +403,10 @@ class CandidateActivity : Activity() {
         name: String,
         number: String
     ) {
-        if (number.isBlank()) {
+        if (
+            number.isBlank() ||
+            callStarted
+        ) {
             return
         }
 
@@ -409,21 +424,78 @@ class CandidateActivity : Activity() {
             return
         }
 
+        val prefs =
+            AppPrefs.prefs(this)
+
+        val consumed =
+            prefs.getString(
+                "last_consumed_call_session",
+                ""
+            ).orEmpty()
+
+        if (
+            sessionId.isNotBlank() &&
+            consumed == sessionId
+        ) {
+            finishAndRemoveTask()
+            return
+        }
+
+        // Mark the list as consumed BEFORE starting Telecom. Even if Android
+        // re-opens the same full-screen intent after a rejected call, this
+        // exact result list can never place a second call.
+        callStarted = true
+
+        if (sessionId.isNotBlank()) {
+            prefs.edit()
+                .putString(
+                    "last_consumed_call_session",
+                    sessionId
+                )
+                .apply()
+        }
+
         AppPrefs.setLastMatch(
             this,
             "Poziv: $name"
         )
         AppPrefs.setStatus(
             this,
-            "ČEKAM: ‘HALO TELEFON’"
+            "Poziv pokrenut. Čekam završetak."
         )
 
-        CallPlacer.call(
-            this,
-            number
+        getSystemService(
+            NotificationManager::class.java
+        ).cancel(
+            VoiceDialService.CANDIDATE_NOTIFICATION_ID
         )
+
+        startService(
+            Intent(
+                this,
+                VoiceDialService::class.java
+            ).setAction(
+                VoiceDialService.ACTION_CALL_STARTED
+            )
+        )
+
+        val appContext =
+            applicationContext
 
         finishAndRemoveTask()
+
+        // Do not block the Activity main thread on Telecom binder work.
+        Thread(
+            {
+                runCatching {
+                    CallPlacer.call(
+                        appContext,
+                        number
+                    )
+                }
+            },
+            "HaloTelefon-PlaceCall"
+        ).start()
     }
 
     private fun maskedNumber(
