@@ -2,12 +2,14 @@ package rs.halotelefon
 
 import android.Manifest
 import android.app.Activity
+import android.app.NotificationManager
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -21,6 +23,7 @@ class CandidateActivity : Activity() {
         const val EXTRA_NUMBERS = "numbers"
         const val EXTRA_NUMBER_DETAILS = "numberDetails"
         const val EXTRA_KEYS = "keys"
+        const val EXTRA_SESSION_ID = "sessionId"
 
         const val ACTION_CLOSE_PICKER =
             "rs.halotelefon.CLOSE_PICKER"
@@ -48,6 +51,8 @@ class CandidateActivity : Activity() {
     private var numbers = arrayListOf<String>()
     private var numberDetails = arrayListOf<String>()
     private var keys = arrayListOf<String>()
+    private var sessionId: String = ""
+    @Volatile private var callStarted = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -70,6 +75,7 @@ class CandidateActivity : Activity() {
         window.navigationBarColor = bg
 
         loadIntent()
+        cancelCandidateNotification()
         render()
     }
 
@@ -77,8 +83,19 @@ class CandidateActivity : Activity() {
         intent: android.content.Intent
     ) {
         super.onNewIntent(intent)
+
+        val previousSession = sessionId
         setIntent(intent)
         loadIntent()
+
+        if (
+            sessionId.isNotBlank() &&
+            sessionId != previousSession
+        ) {
+            callStarted = false
+        }
+
+        cancelCandidateNotification()
         render()
     }
 
@@ -107,6 +124,11 @@ class CandidateActivity : Activity() {
             intent.getStringArrayListExtra(
                 EXTRA_KEYS
             ) ?: arrayListOf()
+
+        sessionId =
+            intent.getStringExtra(
+                EXTRA_SESSION_ID
+            ).orEmpty()
     }
 
     private fun render() {
@@ -391,9 +413,13 @@ class CandidateActivity : Activity() {
         name: String,
         number: String
     ) {
-        if (number.isBlank()) {
+        if (number.isBlank() || callStarted) {
             return
         }
+
+        // Consume this picker session before leaving the activity. This blocks
+        // queued/double taps from submitting more than one Telecom call.
+        callStarted = true
 
         if (
             checkSelfPermission(
@@ -401,6 +427,7 @@ class CandidateActivity : Activity() {
             ) !=
             PackageManager.PERMISSION_GRANTED
         ) {
+            callStarted = false
             Toast.makeText(
                 this,
                 "Nema dozvole za pozivanje.",
@@ -408,6 +435,8 @@ class CandidateActivity : Activity() {
             ).show()
             return
         }
+
+        cancelCandidateNotification()
 
         AppPrefs.setLastMatch(
             this,
@@ -418,12 +447,43 @@ class CandidateActivity : Activity() {
             "ČEKAM: ‘HALO TELEFON’"
         )
 
-        CallPlacer.call(
-            this,
-            number
-        )
+        val requestId =
+            if (sessionId.isNotBlank()) {
+                sessionId
+            } else {
+                "picker-" +
+                    SystemClock.elapsedRealtimeNanos()
+            }
+
+        val placed =
+            runCatching {
+                CallPlacer.call(
+                    this,
+                    number,
+                    requestId
+                )
+            }.getOrElse {
+                false
+            }
+
+        if (!placed) {
+            AppPrefs.setStatus(
+                this,
+                "Poziv nije ponovljen. ČEKAM: ‘HALO TELEFON’"
+            )
+        }
 
         finishAndRemoveTask()
+    }
+
+    private fun cancelCandidateNotification() {
+        runCatching {
+            getSystemService(
+                NotificationManager::class.java
+            ).cancel(
+                VoiceDialService.CANDIDATE_NOTIFICATION_ID
+            )
+        }
     }
 
     private fun maskedNumber(
