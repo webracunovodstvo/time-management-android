@@ -72,6 +72,7 @@ class VoiceDialService : Service() {
     private lateinit var learningStore: LearningStore
 
     @Volatile private var contactCache: List<ContactPhone>? = null
+    @Volatile private var contactPromptCache: String? = null
     private var tone: ToneGenerator? = null
     private var noiseSuppressor: NoiseSuppressor? = null
     private var automaticGainControl: AutomaticGainControl? = null
@@ -323,6 +324,10 @@ class VoiceDialService : Service() {
                         val loaded = loadContactsSafely()
                         if (loaded.isNotEmpty()) {
                             contactCache = loaded
+                            contactPromptCache =
+                                buildShortNamePrompt(
+                                    loaded
+                                )
                         }
                     }
                 }
@@ -1807,60 +1812,85 @@ class VoiceDialService : Service() {
 
         return loadContactsSafely().also {
             contactCache = it
+            if (it.isNotEmpty()) {
+                contactPromptCache =
+                    buildShortNamePrompt(it)
+            }
         }
     }
-
-    private fun buildContactPrompt(): String =
-        "Ime i prezime osobe iz telefonskog imenika u Srbiji."
 
     private fun buildShortNamePrompt(
         contacts: List<ContactPhone>
     ): String {
-        // Do not query SQLite from a sort comparator. This prompt is only
-        // a compact local vocabulary hint; contact frequency is applied later
-        // by ContactMatcher/LearningStore.
-        val orderedContacts =
-            contacts.sortedBy {
-                it.displayName.length
-            }
-
-        val tokens = LinkedHashSet<String>()
-
-        for (contact in orderedContacts) {
-            val clean = contact.displayName
-                .replace(
-                    Regex("[#@()\\[\\]{}.,;:_/\\\\|-]+"),
-                    " "
-                )
-                .replace(Regex("\\s+"), " ")
-                .trim()
-
-            for (token in clean.split(' ')) {
-                val candidate = token.trim()
-                if (candidate.length in 2..12) {
-                    val key =
-                        SerbianNormalizer.normalize(candidate)
-                    if (key.isNotBlank()) {
-                        tokens.add(candidate)
-                    }
+        val usage =
+            learningStore.statsFor(
+                contacts.map {
+                    it.lookupKey
                 }
-            }
-        }
+            )
+
+        val ordered =
+            contacts
+                .distinctBy {
+                    SerbianNormalizer.normalize(
+                        it.displayName
+                    )
+                }
+                .sortedWith(
+                    compareByDescending<ContactPhone> {
+                        usage[
+                            it.lookupKey
+                        ]?.totalUses ?: 0
+                    }.thenByDescending {
+                        usage[
+                            it.lookupKey
+                        ]?.lastUsed ?: 0L
+                    }.thenBy {
+                        it.displayName.length
+                    }
+                )
 
         val prefix =
-            "Moguća imena kontakata. Izgovor je na srpskom: "
-        val builder = StringBuilder(prefix)
+            "Srpsko lično ime ili ime i prezime iz telefonskog imenika. " +
+                "Piši latinicom. Mogući kontakti: "
 
-        for (token in tokens) {
-            if (builder.length + token.length + 2 > 1600) {
+        val builder =
+            StringBuilder(prefix)
+
+        for (contact in ordered) {
+            val clean =
+                contact.displayName
+                    .replace(
+                        Regex("[#@()\\[\\]{}.,;:_/\\\\|-]+"),
+                        " "
+                    )
+                    .replace(
+                        Regex("\\s+"),
+                        " "
+                    )
+                    .trim()
+
+            if (clean.length < 2) {
+                continue
+            }
+
+            if (
+                builder.length +
+                    clean.length +
+                    2 >
+                1800
+            ) {
                 break
             }
 
-            if (builder.length > prefix.length) {
+            if (
+                builder.length >
+                prefix.length
+            ) {
                 builder.append(", ")
             }
 
-            builder.append(token)
+            builder.append(clean)
         }
 
         return builder.toString()
@@ -1869,81 +1899,52 @@ class VoiceDialService : Service() {
     private fun recognizeNameForms(
         audio: FloatArray
     ): List<String> {
-        val forms = ArrayList<String>(2)
+        // v0.22 intentionally performs only one Whisper pass. The old flow
+        // could run a generic pass and then a second contact-aware pass,
+        // which doubled perceived wait time on difficult names.
+        val contacts =
+            getContacts()
 
-        val primary = transcribeShort(
-            audio,
-            buildContactPrompt(),
-            "ime"
-        ).trim()
+        val prompt =
+            contactPromptCache
+                ?: buildShortNamePrompt(
+                    contacts
+                ).also {
+                    contactPromptCache = it
+                }
 
-        if (primary.isNotBlank()) {
-            forms.add(primary)
-
-            // Show the raw result immediately. Contact loading and the
-            // contact-aware fallback must not leave diagnostics at "Još ništa".
-            AppPrefs.setLastHeard(
-                this,
-                primary
-            )
-        }
-
-        AppPrefs.setNameDebug(
-            this,
-            "Primarno: " +
-                if (primary.isBlank()) {
-                    "(prazno)"
-                } else {
-                    primary
-                } +
-                " • proveravam imenik"
-        )
-
-        val contacts = getContacts()
-
-        val primaryScore = if (primary.isBlank()) {
-            0.0
-        } else {
-            ContactMatcher(learningStore)
-                .rank(primary, contacts, 1)
-                .firstOrNull()
-                ?.score ?: 0.0
-        }
-
-        if (
-            primary.isBlank() ||
-            primaryScore < 0.60
-        ) {
-            val contactAware = transcribeShort(
+        val recognized =
+            transcribeShort(
                 audio,
-                buildShortNamePrompt(contacts),
-                "ime + imenik"
+                prompt,
+                "ime • Serbian Small"
             ).trim()
 
-            if (
-                contactAware.isNotBlank() &&
-                contactAware !in forms
-            ) {
-                forms.add(contactAware)
-            }
+        if (recognized.isBlank()) {
+            AppPrefs.setNameDebug(
+                this,
+                "Serbian Small nije vratio tekst."
+            )
+            return emptyList()
         }
+
+        AppPrefs.setLastHeard(
+            this,
+            recognized
+        )
 
         AppPrefs.setNameDebug(
             this,
-            "Ime kandidati: " +
-                if (forms.isEmpty()) {
-                    "(prazno)"
-                } else {
-                    forms.joinToString(" / ")
-                }
+            "Serbian Small • jedan prolaz • raw: " +
+                recognized
         )
 
-        return forms
+        return listOf(recognized)
     }
 
     private fun padForWhisper(audio: FloatArray): FloatArray {
-        val prefix = (SAMPLE_RATE * 0.35).toInt()
-        val suffix = (SAMPLE_RATE * 0.55).toInt()
+        val prefix = (SAMPLE_RATE * 0.22).toInt()
+        val suffix = (SAMPLE_RATE * 0.32).toInt()
         val out = FloatArray(
             prefix + audio.size + suffix
         )
