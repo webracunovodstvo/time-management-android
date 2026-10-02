@@ -95,7 +95,7 @@ class SettingsActivity : Activity(),
 
         root.addView(
             TextView(this).apply {
-                text = "Jednostavan režim: Halo telefon → ime → lista → dodir za poziv."
+                text = "Jednostavan režim: Halo telefon → ime → lista → izbor → OKEJ."
                 textSize = 14f
                 setTextColor(muted)
                 setPadding(0, dp(5), 0, dp(18))
@@ -236,7 +236,7 @@ class SettingsActivity : Activity(),
 
         root.addView(
             TextView(this).apply {
-                text = "Halo Telefon  •  v0.24"
+                text = "Halo Telefon  •  v0.25"
                 textSize = 12f
                 gravity = Gravity.CENTER
                 setTextColor(Color.rgb(156, 163, 175))
