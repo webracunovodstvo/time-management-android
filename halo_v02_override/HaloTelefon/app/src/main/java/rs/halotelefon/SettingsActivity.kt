@@ -30,11 +30,15 @@ class SettingsActivity : Activity(),
     private lateinit var matchValue: TextView
     private var fullScreenButton: Button? = null
 
-    private val bg = Color.rgb(247, 247, 252)
+    private val bg = Color.rgb(245, 247, 251)
     private val surface = Color.WHITE
-    private val ink = Color.rgb(31, 31, 36)
-    private val muted = Color.rgb(104, 104, 116)
-    private val accent = Color.rgb(103, 80, 164)
+    private val ink = Color.rgb(17, 24, 39)
+    private val muted = Color.rgb(107, 114, 128)
+    private val line = Color.rgb(229, 231, 235)
+    private val accent = Color.rgb(79, 70, 229)
+    private val accentSoft = Color.rgb(238, 242, 255)
+    private val green = Color.rgb(5, 150, 105)
+    private val greenSoft = Color.rgb(236, 253, 245)
 
     private val requiredPermissions: Array<String>
         get() = buildList {
@@ -48,6 +52,7 @@ class SettingsActivity : Activity(),
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         window.statusBarColor = bg
         window.navigationBarColor = bg
 
@@ -65,214 +70,130 @@ class SettingsActivity : Activity(),
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(22), dp(24), dp(22), dp(32))
+            setPadding(dp(20), dp(18), dp(20), dp(30))
         }
+
         scroll.addView(root)
 
-        root.addView(TextView(this).apply {
-            text = "‹  Nazad"
-            textSize = 16f
-            setTextColor(accent)
-            setTypeface(typeface, Typeface.BOLD)
-            setPadding(0, 0, 0, dp(18))
-            setOnClickListener { finish() }
-        })
+        root.addView(
+            TextView(this).apply {
+                text = "‹  Nazad"
+                textSize = 15f
+                setTextColor(accent)
+                setTypeface(typeface, Typeface.BOLD)
+                setPadding(0, dp(4), 0, dp(14))
+                setOnClickListener { finish() }
+            }
+        )
 
-        root.addView(TextView(this).apply {
-            text = "Podešavanja"
-            textSize = 30f
-            setTextColor(ink)
-            setTypeface(typeface, Typeface.BOLD)
-        })
+        root.addView(
+            TextView(this).apply {
+                text = "Podešavanja"
+                textSize = 30f
+                setTextColor(ink)
+                setTypeface(typeface, Typeface.BOLD)
+            }
+        )
 
-        root.addView(TextView(this).apply {
-            text = "Wake fraza, rad sa ugašenim ekranom i dijagnostika"
-            textSize = 14f
-            setTextColor(muted)
-            setPadding(0, dp(5), 0, dp(20))
-        })
+        root.addView(
+            TextView(this).apply {
+                text = "Nauči glas aplikaciji i proveri šta trenutno prepoznaje."
+                textSize = 14f
+                setTextColor(muted)
+                setPadding(0, dp(5), 0, dp(18))
+            }
+        )
 
         val wakeCard = card()
-        wakeCard.addView(TextView(this).apply {
-            text = "Wake fraza"
-            textSize = 18f
-            setTextColor(ink)
-            setTypeface(typeface, Typeface.BOLD)
-        })
+        wakeCard.addView(sectionTag("AKTIVACIJA", accentSoft, accent))
+        wakeCard.addView(sectionTitle("Halo telefon"))
+        wakeCard.addView(
+            sectionText(
+                "Snimi svoj izgovor 5 puta. Ovaj profil se koristi samo za aktiviranje aplikacije."
+            )
+        )
 
-        wakeCard.addView(TextView(this).apply {
-            text = "Nauči aplikaciju kako izgovaraš „Halo telefon“."
-            textSize = 13f
-            setTextColor(muted)
-            setPadding(0, dp(4), 0, dp(12))
-        })
+        wakeCard.addView(
+            primaryButton(
+                "Nauči „Halo telefon“"
+            ) {
+                startTraining(
+                    VoiceDialService.ACTION_TRAIN_WAKE
+                )
+            },
+            buttonParams()
+        )
 
-        wakeCard.addView(Button(this).apply {
-            text = "Nauči izgovor „Halo telefon“"
-            isAllCaps = false
-            textSize = 15f
-            setTypeface(typeface, Typeface.BOLD)
-            setTextColor(Color.WHITE)
-            background = rounded(accent, 16f)
-            setOnClickListener {
-                if (ensurePermissions()) {
-                    val intent = Intent(
-                        this@SettingsActivity,
-                        VoiceDialService::class.java
-                    ).setAction(
-                        VoiceDialService.ACTION_TRAIN_WAKE
-                    )
-
-                    if (
-                        prefs.getBoolean(
-                            AppPrefs.KEY_SERVICE_RUNNING,
-                            false
-                        )
-                    ) {
-                        startService(intent)
-                    } else {
-                        startForegroundService(intent)
-                    }
-                }
-            }
-        }, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            dp(50)
-        ))
+        wakeValue = infoValue()
+        wakeCard.addView(wakeValue)
 
         root.addView(wakeCard, cardParams())
 
         val commandCard = card()
-
+        commandCard.addView(sectionTag("GLASOVNI IZBOR", greenSoft, green))
+        commandCard.addView(sectionTitle("Kratke komande"))
         commandCard.addView(
-            TextView(this).apply {
-                text = "Glasovne komande"
-                textSize = 18f
-                setTextColor(ink)
-                setTypeface(
-                    typeface,
-                    Typeface.BOLD
-                )
-            }
-        )
-
-        commandCard.addView(
-            TextView(this).apply {
-                text =
-                    "Aplikacija će naučiti tvoj izgovor za OTKAŽI, PRVI, DRUGI, TREĆI, ČETVRTI i PETI. " +
-                        "Svaku komandu izgovaraš 3 puta."
-                textSize = 13f
-                setTextColor(muted)
-                setPadding(
-                    0,
-                    dp(4),
-                    0,
-                    dp(12)
-                )
-            }
-        )
-
-        commandCard.addView(
-            Button(this).apply {
-                text = "Nauči glasovne komande"
-                isAllCaps = false
-                textSize = 15f
-                setTypeface(
-                    typeface,
-                    Typeface.BOLD
-                )
-                setTextColor(Color.WHITE)
-                background =
-                    rounded(
-                        accent,
-                        16f
-                    )
-                setOnClickListener {
-                    if (ensurePermissions()) {
-                        val serviceIntent =
-                            Intent(
-                                this@SettingsActivity,
-                                VoiceDialService::class.java
-                            ).setAction(
-                                VoiceDialService.ACTION_TRAIN_COMMANDS
-                            )
-
-                        if (
-                            prefs.getBoolean(
-                                AppPrefs.KEY_SERVICE_RUNNING,
-                                false
-                            )
-                        ) {
-                            startService(
-                                serviceIntent
-                            )
-                        } else {
-                            startForegroundService(
-                                serviceIntent
-                            )
-                        }
-                    }
-                }
-            },
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                dp(50)
+            sectionText(
+                "Nauči OTKAŽI, PRVI, DRUGI, TREĆI, ČETVRTI i PETI. " +
+                    "Svaku reč izgovori 3 puta, normalnim tempom."
             )
         )
 
-        commandValue =
-            TextView(this).apply {
-                textSize = 13f
-                setTextColor(muted)
-                setPadding(
-                    0,
-                    dp(10),
-                    0,
-                    0
+        commandCard.addView(
+            primaryButton(
+                "Nauči glasovne komande"
+            ) {
+                startTraining(
+                    VoiceDialService.ACTION_TRAIN_COMMANDS
                 )
-            }
+            },
+            buttonParams()
+        )
+
+        commandValue = infoValue()
+        commandCard.addView(commandValue)
 
         commandCard.addView(
-            commandValue
+            TextView(this).apply {
+                text = "Savet: reci kratku reč jasno, ali bez razvlačenja. v0.21 prihvata i kraće izgovore."
+                textSize = 12.5f
+                setTextColor(muted)
+                setPadding(0, dp(10), 0, 0)
+            }
         )
 
-        root.addView(
-            commandCard,
-            cardParams()
-        )
+        root.addView(commandCard, cardParams())
 
         val screenCard = card()
-
-        screenCard.addView(TextView(this).apply {
-            text = "Rad sa ugašenim ekranom"
-            textSize = 18f
-            setTextColor(ink)
-            setTypeface(typeface, Typeface.BOLD)
-        })
+        screenCard.addView(sectionTag("EKRAN", accentSoft, accent))
+        screenCard.addView(sectionTitle("Rad tokom glasovne radnje"))
 
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(0, dp(8), 0, 0)
+            setPadding(0, dp(7), 0, 0)
         }
 
-        row.addView(TextView(this).apply {
-            text =
-                "Wake lock radi samo dok je ekran ugašen. " +
-                    "U idle režimu Whisper nije aktivan."
-            textSize = 13f
-            setTextColor(muted)
-        }, LinearLayout.LayoutParams(
-            0,
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            1f
-        ))
+        row.addView(
+            TextView(this).apply {
+                text = "Drži aplikaciju aktivnom dok biraš kontakt ili potvrđuješ poziv."
+                textSize = 13f
+                setTextColor(muted)
+            },
+            LinearLayout.LayoutParams(
+                0,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                1f
+            )
+        )
 
         keepAwakeSwitch = Switch(this).apply {
-            isChecked = prefs.getBoolean(
-                AppPrefs.KEY_KEEP_AWAKE,
-                true
-            )
+            isChecked =
+                prefs.getBoolean(
+                    AppPrefs.KEY_KEEP_AWAKE,
+                    true
+                )
+
             setOnCheckedChangeListener { _, checked ->
                 prefs.edit()
                     .putBoolean(
@@ -282,39 +203,26 @@ class SettingsActivity : Activity(),
                     .apply()
             }
         }
+
         row.addView(keepAwakeSwitch)
         screenCard.addView(row)
 
         if (Build.VERSION.SDK_INT >= 34) {
-            fullScreenButton = Button(this).apply {
-                text = "Omogući izbor preko zaključanog ekrana"
-                isAllCaps = false
-                textSize = 14f
-                setTextColor(accent)
-                setTypeface(typeface, Typeface.BOLD)
-                background = outlined(
-                    Color.WHITE,
-                    accent,
-                    15f
-                )
-                setOnClickListener {
+            fullScreenButton =
+                secondaryButton(
+                    "Omogući prikaz preko zaključanog ekrana"
+                ) {
                     startActivity(
                         Intent(
                             Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT,
-                            Uri.parse(
-                                "package:" + packageName
-                            )
+                            Uri.parse("package:" + packageName)
                         )
                     )
                 }
-            }
 
             screenCard.addView(
                 fullScreenButton,
-                LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    dp(48)
-                ).apply {
+                buttonParams().apply {
                     topMargin = dp(12)
                 }
             )
@@ -323,100 +231,149 @@ class SettingsActivity : Activity(),
         root.addView(screenCard, cardParams())
 
         val testCard = card()
-
-        testCard.addView(TextView(this).apply {
-            text = "Test prepoznavanja imena"
-            textSize = 18f
-            setTextColor(ink)
-            setTypeface(typeface, Typeface.BOLD)
-        })
-
-        testCard.addView(TextView(this).apply {
-            text =
-                "Preskače „Halo telefon“ i odmah sluša ime. " +
-                    "Koristi samo za dijagnostiku."
-            textSize = 13f
-            setTextColor(muted)
-            setPadding(0, dp(4), 0, dp(12))
-        })
-
-        testCard.addView(Button(this).apply {
-            text = "Testiraj ime"
-            isAllCaps = false
-            textSize = 15f
-            setTextColor(accent)
-            setTypeface(typeface, Typeface.BOLD)
-            background = outlined(
-                Color.WHITE,
-                accent,
-                15f
+        testCard.addView(sectionTag("TEST", accentSoft, accent))
+        testCard.addView(sectionTitle("Prepoznavanje imena"))
+        testCard.addView(
+            sectionText(
+                "Preskače „Halo telefon“ i odmah sluša ime. Koristi za proveru mikrofona i Whisper prepoznavanja."
             )
-            setOnClickListener {
-                if (ensurePermissions()) {
-                    val intent = Intent(
-                        this@SettingsActivity,
-                        VoiceDialService::class.java
-                    ).setAction(
-                        VoiceDialService.ACTION_TEST_NAME
-                    )
+        )
 
-                    if (
-                        prefs.getBoolean(
-                            AppPrefs.KEY_SERVICE_RUNNING,
-                            false
-                        )
-                    ) {
-                        startService(intent)
-                    } else {
-                        startForegroundService(intent)
-                    }
-                }
-            }
-        }, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            dp(48)
-        ))
+        testCard.addView(
+            secondaryButton(
+                "Testiraj ime kontakta"
+            ) {
+                startTraining(
+                    VoiceDialService.ACTION_TEST_NAME
+                )
+            },
+            buttonParams()
+        )
 
         root.addView(testCard, cardParams())
 
         val diagCard = card()
+        diagCard.addView(sectionTag("DIJAGNOSTIKA", accentSoft, accent))
+        diagCard.addView(sectionTitle("Šta aplikacija vidi"))
 
-        diagCard.addView(TextView(this).apply {
-            text = "Dijagnostika"
-            textSize = 18f
-            setTextColor(ink)
-            setTypeface(typeface, Typeface.BOLD)
-        })
-
-        wakeValue = detailRow(
-            diagCard,
-            "Wake profil"
-        )
-        heardValue = detailRow(
-            diagCard,
-            "Prepoznato ime"
-        )
-        debugValue = detailRow(
-            diagCard,
-            "Obrada"
-        )
-        matchValue = detailRow(
-            diagCard,
-            "Kontakt"
-        )
+        wakeValue = detailRow(diagCard, "Wake profil", wakeValue)
+        heardValue = detailRow(diagCard, "Poslednje prepoznato")
+        debugValue = detailRow(diagCard, "Obrada")
+        matchValue = detailRow(diagCard, "Kontakt")
 
         root.addView(diagCard, cardParams())
 
-        root.addView(TextView(this).apply {
-            text =
-                "v0.20  •  naučene glasovne komande • brži izbor kontakta"
-            textSize = 12f
-            gravity = Gravity.CENTER
-            setTextColor(muted)
-            setPadding(0, dp(10), 0, 0)
-        })
+        root.addView(
+            TextView(this).apply {
+                text = "Halo Telefon  •  v0.21"
+                textSize = 12f
+                gravity = Gravity.CENTER
+                setTextColor(Color.rgb(156, 163, 175))
+                setPadding(0, dp(8), 0, 0)
+            }
+        )
 
         return scroll
+    }
+
+    private fun sectionTag(
+        label: String,
+        fill: Int,
+        textColor: Int
+    ): TextView =
+        TextView(this).apply {
+            text = label
+            textSize = 10.5f
+            letterSpacing = 0.08f
+            setTextColor(textColor)
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(dp(10), dp(5), dp(10), dp(5))
+            background = rounded(fill, 99f)
+        }
+
+    private fun sectionTitle(
+        value: String
+    ): TextView =
+        TextView(this).apply {
+            text = value
+            textSize = 20f
+            setTextColor(ink)
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, dp(10), 0, 0)
+        }
+
+    private fun sectionText(
+        value: String
+    ): TextView =
+        TextView(this).apply {
+            text = value
+            textSize = 13f
+            setTextColor(muted)
+            setPadding(0, dp(5), 0, dp(12))
+        }
+
+    private fun infoValue(): TextView =
+        TextView(this).apply {
+            textSize = 12.5f
+            setTextColor(muted)
+            setPadding(0, dp(10), 0, 0)
+        }
+
+    private fun primaryButton(
+        label: String,
+        action: () -> Unit
+    ): Button =
+        Button(this).apply {
+            text = label
+            isAllCaps = false
+            textSize = 15f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(Color.WHITE)
+            background = rounded(accent, 16f)
+            setOnClickListener { action() }
+        }
+
+    private fun secondaryButton(
+        label: String,
+        action: () -> Unit
+    ): Button =
+        Button(this).apply {
+            text = label
+            isAllCaps = false
+            textSize = 14f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(ink)
+            background = outlined(
+                surface,
+                line,
+                16f
+            )
+            setOnClickListener { action() }
+        }
+
+    private fun startTraining(
+        action: String
+    ) {
+        if (!ensurePermissions()) {
+            return
+        }
+
+        val intent =
+            Intent(
+                this,
+                VoiceDialService::class.java
+            ).setAction(action)
+
+        if (
+            prefs.getBoolean(
+                AppPrefs.KEY_SERVICE_RUNNING,
+                false
+            )
+        ) {
+            startService(intent)
+        } else {
+            startForegroundService(intent)
+        }
     }
 
     private fun card(): LinearLayout =
@@ -424,14 +381,16 @@ class SettingsActivity : Activity(),
             orientation = LinearLayout.VERTICAL
             setPadding(
                 dp(18),
-                dp(16),
+                dp(17),
                 dp(18),
-                dp(16)
+                dp(17)
             )
-            background = rounded(
+            background = outlined(
                 surface,
+                line,
                 22f
             )
+            elevation = dp(1).toFloat()
         }
 
     private fun cardParams() =
@@ -439,37 +398,46 @@ class SettingsActivity : Activity(),
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT
         ).apply {
-            bottomMargin = dp(14)
+            bottomMargin = dp(13)
         }
+
+    private fun buttonParams() =
+        LinearLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            dp(50)
+        )
 
     private fun detailRow(
         parent: LinearLayout,
-        title: String
+        title: String,
+        reuse: TextView? = null
     ): TextView {
         parent.addView(
             TextView(this).apply {
                 text = title.uppercase()
-                textSize = 11f
+                textSize = 10.5f
+                letterSpacing = 0.06f
                 setTextColor(muted)
-                setTypeface(
-                    typeface,
-                    Typeface.BOLD
-                )
-                setPadding(
-                    0,
-                    dp(10),
-                    0,
-                    dp(3)
-                )
+                setTypeface(typeface, Typeface.BOLD)
+                setPadding(0, dp(12), 0, dp(3))
             }
         )
 
-        return TextView(this).also { value ->
-            value.textSize = 14f
+        return (reuse ?: TextView(this)).also { value ->
+            value.textSize = 13.5f
             value.setTextColor(ink)
-            parent.addView(value)
+
+            if (value.parent == null) {
+                parent.addView(value)
+            }
         }
     }
+
+    private fun detailRow(
+        parent: LinearLayout,
+        title: String
+    ): TextView =
+        detailRow(parent, title, null)
 
     private fun refresh() {
         keepAwakeSwitch.isChecked =
@@ -512,7 +480,9 @@ class SettingsActivity : Activity(),
     }
 
     private fun refreshFullScreenPermission() {
-        if (Build.VERSION.SDK_INT < 34) return
+        if (Build.VERSION.SDK_INT < 34) {
+            return
+        }
 
         val manager =
             getSystemService(
@@ -520,9 +490,7 @@ class SettingsActivity : Activity(),
             )
 
         fullScreenButton?.visibility =
-            if (
-                manager.canUseFullScreenIntent()
-            ) {
+            if (manager.canUseFullScreenIntent()) {
                 View.GONE
             } else {
                 View.VISIBLE
@@ -541,11 +509,13 @@ class SettingsActivity : Activity(),
                 missing.toTypedArray(),
                 43
             )
+
             Toast.makeText(
                 this,
                 "Dozvoli mikrofon, kontakte i pozivanje, pa pokušaj ponovo.",
                 Toast.LENGTH_LONG
             ).show()
+
             return false
         }
 
@@ -569,10 +539,7 @@ class SettingsActivity : Activity(),
     ): GradientDrawable =
         GradientDrawable().apply {
             setColor(fill)
-            setStroke(
-                dp(1),
-                stroke
-            )
+            setStroke(dp(1), stroke)
             cornerRadius =
                 dp(radiusDp.toInt()).toFloat()
         }
@@ -582,7 +549,7 @@ class SettingsActivity : Activity(),
             value *
                 resources.displayMetrics.density +
                 0.5f
-            ).toInt()
+        ).toInt()
 
     override fun onResume() {
         super.onResume()
@@ -593,7 +560,9 @@ class SettingsActivity : Activity(),
         sharedPreferences: SharedPreferences?,
         key: String?
     ) {
-        runOnUiThread { refresh() }
+        runOnUiThread {
+            refresh()
+        }
     }
 
     override fun onDestroy() {
