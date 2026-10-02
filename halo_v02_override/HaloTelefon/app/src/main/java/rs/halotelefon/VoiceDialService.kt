@@ -454,14 +454,14 @@ class VoiceDialService : Service() {
                             nameSegmenter.reset()
                             AppPrefs.setStatus(
                                 this,
-                                "RECI IME • ili reci OTKAŽI"
+                                "RECI IME"
                             )
                             AppPrefs.setNameDebug(
                                 this,
                                 "Čekam ime; interakcija ostaje aktivna"
                             )
                             updateServiceNotification(
-                                "RECI IME • OTKAŽI"
+                                "RECI IME"
                             )
                             continue
                         }
@@ -1663,133 +1663,229 @@ class VoiceDialService : Service() {
         }
     }
 
-    private fun handleNameForms(spokenForms: List<String>) {
-        val forms = spokenForms
-            .map { it.trim() }
-            .filter { it.isNotBlank() }
-            .distinct()
+    private fun handleNameForms(
+        spokenForms: List<String>
+    ) {
+        val spoken =
+            spokenForms
+                .map { it.trim() }
+                .firstOrNull {
+                    it.isNotBlank()
+                }
+                .orEmpty()
 
-        if (forms.isEmpty()) {
-            pendingCandidates = emptyList()
+        if (spoken.isBlank()) {
             mode = Mode.WAIT_NAME
-            AppPrefs.setStatus(this, "Nisam razumeo ime. Reci ponovo.")
-            beepError()
-            return
-        }
-
-        AppPrefs.setStatus(this, "TRAŽIM KONTAKT…")
-
-        val contacts = getContacts()
-        val ranked = ContactMatcher(learningStore)
-            .rankBestOf(forms, contacts, 30)
-
-        val best = ranked.firstOrNull()
-
-        if (best == null || best.score < 0.58) {
-            selectedContact = null
-            selectedSpoken = ""
-            pendingCandidates = emptyList()
-            mode = Mode.WAIT_NAME
+            nameInferencePending = false
             AppPrefs.setStatus(
                 this,
-                "Nisam našao kontakt. Reci ime ponovo."
+                "Nisam razumeo ime. Reci ponovo."
             )
-            updateServiceNotification("Reci drugo ime")
+            updateServiceNotification(
+                "RECI IME"
+            )
             beepError()
             return
         }
-
-        val floor = maxOf(0.58, best.score - 0.16)
-
-        val plausible = ranked
-            .filter { it.score >= floor }
-            .distinctBy {
-                SerbianNormalizer.normalize(
-                    it.contact.displayName
-                ) + "|" +
-                    it.contact.number
-                        .filter(Char::isDigit)
-                        .takeLast(12)
-            }
-
-        val usageStats =
-            learningStore.statsFor(
-                plausible.map {
-                    it.contact.lookupKey
-                }
-            )
-
-        val ordered = plausible
-            .sortedWith(
-                compareByDescending<ContactCandidate> {
-                    usageStats[
-                        it.contact.lookupKey
-                    ]?.totalUses ?: 0
-                }.thenByDescending {
-                    usageStats[
-                        it.contact.lookupKey
-                    ]?.lastUsed ?: 0L
-                }.thenByDescending {
-                    it.score
-                }
-            )
-            .take(5)
-            .ifEmpty {
-                listOf(best)
-            }
-
-        val selected =
-            ordered.maxWithOrNull(
-                compareBy<ContactCandidate> {
-                    it.score
-                }.thenBy {
-                    usageStats[
-                        it.contact.lookupKey
-                    ]?.totalUses ?: 0
-                }
-            ) ?: ordered.first()
-
-        selectedContact = selected.contact
-        pendingCandidates = ordered
-
-        // Keep the first/raw transcript as the learned alias. If Whisper
-        // consistently hears a short Serbian name the same wrong way,
-        // confirmation teaches that acoustic spelling to the chosen contact.
-        selectedSpoken = forms.first()
-
-        mode =
-            if (ordered.size > 1) {
-                Mode.WAIT_SELECT
-            } else {
-                Mode.WAIT_CONFIRM
-            }
 
         AppPrefs.setStatus(
             this,
-            if (mode == Mode.WAIT_SELECT) {
-                selectionStatus()
-            } else {
-                "OZNAČEN: " +
-                    selected.contact.displayName +
-                    " • ZOVI / MOŽE / OK / OTKAŽI"
-            }
+            "TRAŽIM: $spoken"
         )
 
-        updateServiceNotification(
-            if (mode == Mode.WAIT_SELECT) {
-                "PRVI / DRUGI / TREĆI / ČETVRTI / PETI • OTKAŽI"
-            } else {
-                "ZOVI / MOŽE / OK / OTKAŽI • HALO TELEFON = NOVO IME"
-            }
-        )
+        val matches =
+            findContactsForName(
+                spoken,
+                getContacts()
+            )
+
+        if (matches.isEmpty()) {
+            mode = Mode.WAIT_NAME
+            nameInferencePending = false
+            AppPrefs.setLastMatch(
+                this,
+                "Nema kontakta za: $spoken"
+            )
+            AppPrefs.setStatus(
+                this,
+                "Nisam našao „$spoken“. Reci ime ponovo."
+            )
+            updateServiceNotification(
+                "Nisam našao kontakt • reci ime ponovo"
+            )
+            beepError()
+            return
+        }
 
         showCandidatePicker(
-            forms.joinToString(" / "),
-            ordered,
-            selected.contact
+            spoken,
+            matches
         )
 
-        beepReady()
+        AppPrefs.setLastMatch(
+            this,
+            "Lista za $spoken • " +
+                matches.size +
+                " kontakata"
+        )
+
+        // Posle prikaza liste više ništa ne biramo glasom.
+        // Sledeća glasovna radnja počinje tek novim "Halo telefon".
+        mode = Mode.WAIT_WAKE
+        nameInferencePending = false
+        segmentQueue.clear()
+        wakeAllowedAtMs =
+            SystemClock.elapsedRealtime() +
+                1_200L
+        releaseInteractionScreenLock()
+
+        AppPrefs.setStatus(
+            this,
+            "Lista je otvorena. Dodirni kontakt za poziv."
+        )
+        updateServiceNotification(
+            "ČEKAM: ‘HALO TELEFON’"
+        )
+        beepSuccess()
+    }
+
+    private fun findContactsForName(
+        spoken: String,
+        contacts: List<ContactPhone>
+    ): List<ContactCandidate> {
+        val queryTokens =
+            SerbianNormalizer.normalize(
+                spoken
+            )
+                .split(' ')
+                .map { it.trim() }
+                .filter {
+                    it.length >= 2
+                }
+                .distinct()
+
+        if (
+            queryTokens.isEmpty() ||
+            contacts.isEmpty()
+        ) {
+            return emptyList()
+        }
+
+        data class Scored(
+            val contact: ContactPhone,
+            val score: Double,
+            val exact: Boolean
+        )
+
+        val scored =
+            contacts.map { contact ->
+                val nameTokens =
+                    contact.displayName
+                        .replace(
+                            Regex(
+                                "[#@()\\[\\]{}.,;:_/\\\\|-]+"
+                            ),
+                            " "
+                        )
+                        .replace(
+                            Regex("\\s+"),
+                            " "
+                        )
+                        .trim()
+                        .split(' ')
+                        .map {
+                            SerbianNormalizer
+                                .normalize(it)
+                        }
+                        .filter {
+                            it.length >= 2
+                        }
+
+                var best = 0.0
+                var exact = false
+
+                for (query in queryTokens) {
+                    for (token in nameTokens) {
+                        if (query == token) {
+                            exact = true
+                            best = 1.0
+                        } else {
+                            best =
+                                maxOf(
+                                    best,
+                                    SerbianNormalizer
+                                        .similarity(
+                                            query,
+                                            token
+                                        ),
+                                    SerbianPhonetics
+                                        .similarity(
+                                            query,
+                                            token
+                                        )
+                                )
+                        }
+                    }
+                }
+
+                Scored(
+                    contact = contact,
+                    score = best,
+                    exact = exact
+                )
+            }
+
+        val exact =
+            scored
+                .filter {
+                    it.exact
+                }
+                .sortedBy {
+                    SerbianNormalizer.normalize(
+                        it.contact.displayName
+                    )
+                }
+
+        val chosen =
+            if (exact.isNotEmpty()) {
+                exact
+            } else {
+                val best =
+                    scored.maxOfOrNull {
+                        it.score
+                    } ?: 0.0
+
+                val floor =
+                    maxOf(
+                        0.66,
+                        best - 0.12
+                    )
+
+                scored
+                    .filter {
+                        it.score >= floor
+                    }
+                    .sortedWith(
+                        compareByDescending<Scored> {
+                            it.score
+                        }.thenBy {
+                            SerbianNormalizer
+                                .normalize(
+                                    it.contact.displayName
+                                )
+                        }
+                    )
+            }
+
+        return chosen
+            .take(80)
+            .map {
+                ContactCandidate(
+                    contact = it.contact,
+                    score = it.score,
+                    learnedUses = 0
+                )
+            }
     }
 
     private fun loadContactsSafely(): List<ContactPhone> {
@@ -1959,178 +2055,125 @@ class VoiceDialService : Service() {
 
     private fun showCandidatePicker(
         spoken: String,
-        candidates: List<ContactCandidate>,
-        selected: ContactPhone
+        candidates: List<ContactCandidate>
     ) {
-        val ordered = candidates
-            .distinctBy {
-                SerbianNormalizer.normalize(
+        val ordered =
+            candidates
+                .distinctBy {
+                    it.contact.lookupKey
+                }
+                .take(80)
+
+        val names =
+            ArrayList(
+                ordered.map {
                     it.contact.displayName
-                ) + "|" +
-                    it.contact.number
-                        .filter(Char::isDigit)
-                        .takeLast(12)
-            }
-            .sortedWith(
-                compareByDescending<ContactCandidate> {
-                    learningStore.totalUses(
-                        it.contact.lookupKey
-                    )
-                }.thenByDescending {
-                    learningStore.lastUsed(
-                        it.contact.lookupKey
-                    )
-                }.thenByDescending {
-                    it.score
                 }
             )
-            .take(5)
 
-        val names = ArrayList(
-            ordered.map {
-                it.contact.displayName
-            }
-        )
+        val numbers =
+            ArrayList(
+                ordered.map {
+                    // ContactRepository already puts a mobile number first
+                    // when the contact has several numbers.
+                    it.contact.number
+                }
+            )
 
-        val numbers = ArrayList(
-            ordered.map {
-                it.contact.number
-            }
-        )
+        val numberDetails =
+            ArrayList(
+                ordered.map {
+                    it.contact.numberSummary(
+                        compact = true
+                    )
+                }
+            )
 
-        val numberDetails = ArrayList(
-            ordered.map {
-                it.contact.numberSummary(
-                    compact = false
-                )
-            }
-        )
-
-        val keys = ArrayList(
-            ordered.map {
-                it.contact.lookupKey
-            }
-        )
-
-        val uses = ArrayList(
-            ordered.map {
-                learningStore.totalUses(
+        val keys =
+            ArrayList(
+                ordered.map {
                     it.contact.lookupKey
+                }
+            )
+
+        val picker =
+            Intent(
+                this,
+                CandidateActivity::class.java
+            ).apply {
+                putExtra(
+                    CandidateActivity.EXTRA_SPOKEN,
+                    spoken
+                )
+                putStringArrayListExtra(
+                    CandidateActivity.EXTRA_NAMES,
+                    names
+                )
+                putStringArrayListExtra(
+                    CandidateActivity.EXTRA_NUMBERS,
+                    numbers
+                )
+                putStringArrayListExtra(
+                    CandidateActivity.EXTRA_NUMBER_DETAILS,
+                    numberDetails
+                )
+                putStringArrayListExtra(
+                    CandidateActivity.EXTRA_KEYS,
+                    keys
+                )
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP
                 )
             }
-        )
 
-        val scores = ordered
-            .map { it.score }
-            .toDoubleArray()
-
-        val selectedIndex = ordered
-            .indexOfFirst {
-                it.contact.lookupKey ==
-                    selected.lookupKey &&
-                    it.contact.number ==
-                    selected.number
-            }
-            .coerceAtLeast(0)
-
-        AppPrefs.setLastMatch(
-            this,
-            ordered.joinToString(" • ") {
-                it.contact.displayName + " " +
-                    "%.0f".format(
-                        it.score * 100
-                    ) + "% · " +
-                    learningStore.totalUses(
-                        it.contact.lookupKey
-                    ) + "×"
-            }
-        )
-
-        val picker = Intent(
-            this,
-            CandidateActivity::class.java
-        ).apply {
-            putExtra(
-                CandidateActivity.EXTRA_SPOKEN,
-                spoken
+        val pending =
+            PendingIntent.getActivity(
+                this,
+                901,
+                picker,
+                PendingIntent.FLAG_UPDATE_CURRENT or
+                    PendingIntent.FLAG_IMMUTABLE
             )
-            putStringArrayListExtra(
-                CandidateActivity.EXTRA_NAMES,
-                names
-            )
-            putStringArrayListExtra(
-                CandidateActivity.EXTRA_NUMBERS,
-                numbers
-            )
-            putStringArrayListExtra(
-                CandidateActivity.EXTRA_NUMBER_DETAILS,
-                numberDetails
-            )
-            putStringArrayListExtra(
-                CandidateActivity.EXTRA_KEYS,
-                keys
-            )
-            putIntegerArrayListExtra(
-                CandidateActivity.EXTRA_USES,
-                uses
-            )
-            putExtra(
-                CandidateActivity.EXTRA_SCORES,
-                scores
-            )
-            putExtra(
-                CandidateActivity.EXTRA_SELECTED_INDEX,
-                selectedIndex
-            )
-            addFlags(
-                Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                    Intent.FLAG_ACTIVITY_SINGLE_TOP
-            )
-        }
-
-        val pending = PendingIntent.getActivity(
-            this,
-            901,
-            picker,
-            PendingIntent.FLAG_UPDATE_CURRENT or
-                PendingIntent.FLAG_IMMUTABLE
-        )
 
         val manager =
             getSystemService(
                 NotificationManager::class.java
             )
 
-        val builder = Notification.Builder(
-            this,
-            CANDIDATE_CHANNEL_ID
-        )
-            .setSmallIcon(
-                android.R.drawable.sym_action_call
+        val builder =
+            Notification.Builder(
+                this,
+                CANDIDATE_CHANNEL_ID
             )
-            .setContentTitle(
-                "Potvrdi kontakt"
-            )
-            .setContentText(
-                names.take(3)
-                    .joinToString(" • ")
-            )
-            .setContentIntent(pending)
-            .setCategory(
-                Notification.CATEGORY_CALL
-            )
-            .setPriority(
-                Notification.PRIORITY_MAX
-            )
-            .setVisibility(
-                Notification.VISIBILITY_PUBLIC
-            )
-            .setAutoCancel(true)
+                .setSmallIcon(
+                    android.R.drawable
+                        .sym_action_call
+                )
+                .setContentTitle(
+                    "Izaberi kontakt"
+                )
+                .setContentText(
+                    names.take(4)
+                        .joinToString(" • ")
+                )
+                .setContentIntent(pending)
+                .setCategory(
+                    Notification.CATEGORY_CALL
+                )
+                .setPriority(
+                    Notification.PRIORITY_MAX
+                )
+                .setVisibility(
+                    Notification.VISIBILITY_PUBLIC
+                )
+                .setAutoCancel(true)
 
         val canFullScreen =
             Build.VERSION.SDK_INT < 34 ||
-                manager.canUseFullScreenIntent()
+                manager
+                    .canUseFullScreenIntent()
 
         if (canFullScreen) {
             builder.setFullScreenIntent(
@@ -2149,6 +2192,8 @@ class VoiceDialService : Service() {
                 PowerManager::class.java
             )
 
+        // "Halo telefon" already wakes the screen. Open the list immediately
+        // so the next user action is only scroll + tap.
         if (pm.isInteractive) {
             runCatching {
                 startActivity(picker)
