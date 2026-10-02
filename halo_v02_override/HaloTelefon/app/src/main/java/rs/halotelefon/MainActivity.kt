@@ -114,7 +114,7 @@ class MainActivity : Activity(),
 
         titleWrap.addView(
             TextView(this).apply {
-                text = "Halo telefon → ime → lista → dodir za poziv"
+                text = "Halo telefon → ime → lista → izbor → OKEJ"
                 textSize = 13f
                 setTextColor(muted)
                 setPadding(0, dp(2), 0, 0)
@@ -288,7 +288,7 @@ class MainActivity : Activity(),
 
         guide.addView(stepRow("1", "Reci „Halo telefon“", "Aktivira slušanje imena."))
         guide.addView(stepRow("2", "Reci samo ime", "Na primer: „Petar“."))
-        guide.addView(stepRow("3", "Skroluj i dodirni kontakt", "Dodir odmah pokreće poziv."))
+        guide.addView(stepRow("3", "Skroluj i izaberi kontakt", "Dodir samo označava kontakt."))\n        guide.addView(stepRow("4", "Reci „okej“", "Poziv kreće tek nakon potvrde."))
 
         root.addView(
             guide,
@@ -312,7 +312,7 @@ class MainActivity : Activity(),
 
         root.addView(
             TextView(this).apply {
-                text = "v0.24"
+                text = "v0.25"
                 textSize = 12f
                 gravity = Gravity.CENTER
                 setTextColor(Color.rgb(156, 163, 175))
