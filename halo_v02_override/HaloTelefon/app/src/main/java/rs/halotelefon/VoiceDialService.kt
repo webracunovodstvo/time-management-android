@@ -29,6 +29,7 @@ class VoiceDialService : Service() {
         const val ACTION_TEST_NAME = "rs.halotelefon.TEST_NAME"
         const val ACTION_SELECT_CANDIDATE = "rs.halotelefon.SELECT_CANDIDATE"
         const val ACTION_CANCEL_INTERACTION = "rs.halotelefon.CANCEL_INTERACTION"
+        const val ACTION_CALL_STARTED = "rs.halotelefon.CALL_STARTED"
 
         const val EXTRA_LOOKUP_KEY = "lookupKey"
         const val EXTRA_NAME = "name"
@@ -36,7 +37,7 @@ class VoiceDialService : Service() {
 
         private const val CHANNEL_ID = "halo_voice"
         private const val NOTIFICATION_ID = 1001
-        private const val CANDIDATE_NOTIFICATION_ID = 1002
+        const val CANDIDATE_NOTIFICATION_ID = 1002
         private const val CANDIDATE_CHANNEL_ID = "halo_candidates_v1"
         private const val SAMPLE_RATE = 16_000
     }
@@ -134,6 +135,37 @@ class VoiceDialService : Service() {
         when (intent?.action) {
             ACTION_STOP -> {
                 stopSelf()
+                return START_NOT_STICKY
+            }
+
+            ACTION_CALL_STARTED -> {
+                mode = Mode.WAIT_WAKE
+                nameInferencePending = false
+                selectedContact = null
+                selectedSpoken = ""
+                pendingCandidates = emptyList()
+                segmentQueue.clear()
+
+                // Ignore the dial transition and any call audio. The recording
+                // loop also checks AudioManager.MODE_IN_CALL /
+                // MODE_IN_COMMUNICATION continuously until the call is over.
+                ignoreAudioUntilMs =
+                    SystemClock.elapsedRealtime() +
+                        2_500L
+
+                getSystemService(
+                    NotificationManager::class.java
+                ).cancel(
+                    CANDIDATE_NOTIFICATION_ID
+                )
+
+                AppPrefs.setStatus(
+                    this,
+                    "Poziv je u toku."
+                )
+                updateServiceNotification(
+                    "Poziv u toku • glasovno slušanje pauzirano"
+                )
                 return START_NOT_STICKY
             }
 
@@ -423,6 +455,28 @@ class VoiceDialService : Service() {
                     trainingSegmenter.reset()
                     nameSegmenter.reset()
                     confirmationSegmenter.reset()
+                    continue
+                }
+
+                val audioManager =
+                    getSystemService(
+                        AudioManager::class.java
+                    )
+
+                if (
+                    audioManager.mode ==
+                        AudioManager.MODE_IN_CALL ||
+                    audioManager.mode ==
+                        AudioManager.MODE_IN_COMMUNICATION
+                ) {
+                    wakeSegmenter.reset()
+                    trainingSegmenter.reset()
+                    nameSegmenter.reset()
+                    confirmationSegmenter.reset()
+                    segmentQueue.clear()
+                    mode = Mode.WAIT_WAKE
+                    nameInferencePending = false
+                    SystemClock.sleep(120)
                     continue
                 }
 
@@ -2084,6 +2138,10 @@ class VoiceDialService : Service() {
                 }
             )
 
+        val sessionId =
+            SystemClock.elapsedRealtimeNanos()
+                .toString()
+
         val picker =
             Intent(
                 this,
@@ -2108,6 +2166,10 @@ class VoiceDialService : Service() {
                 putStringArrayListExtra(
                     CandidateActivity.EXTRA_KEYS,
                     keys
+                )
+                putExtra(
+                    CandidateActivity.EXTRA_SESSION_ID,
+                    sessionId
                 )
                 addFlags(
                     Intent.FLAG_ACTIVITY_NEW_TASK or
