@@ -21,15 +21,18 @@ class MainActivity : Activity(),
     private lateinit var statusOverlay: TextView
     private lateinit var statusDetail: TextView
     private lateinit var mainButton: Button
+    private lateinit var livePill: TextView
 
-    private val bg = Color.rgb(247, 247, 252)
+    private val bg = Color.rgb(245, 247, 251)
     private val surface = Color.WHITE
-    private val ink = Color.rgb(31, 31, 36)
-    private val muted = Color.rgb(104, 104, 116)
-    private val accent = Color.rgb(103, 80, 164)
-    private val accentSoft = Color.rgb(238, 232, 255)
-    private val green = Color.rgb(24, 121, 78)
-    private val greenSoft = Color.rgb(229, 247, 237)
+    private val ink = Color.rgb(17, 24, 39)
+    private val muted = Color.rgb(107, 114, 128)
+    private val line = Color.rgb(229, 231, 235)
+    private val accent = Color.rgb(79, 70, 229)
+    private val accentDark = Color.rgb(55, 48, 163)
+    private val accentSoft = Color.rgb(238, 242, 255)
+    private val green = Color.rgb(5, 150, 105)
+    private val greenSoft = Color.rgb(236, 253, 245)
 
     private val requiredPermissions: Array<String>
         get() = buildList {
@@ -43,15 +46,16 @@ class MainActivity : Activity(),
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
         window.statusBarColor = bg
         window.navigationBarColor = bg
 
         prefs = AppPrefs.prefs(this)
 
-        if (prefs.getInt("ui_migration", 0) < 8) {
+        if (prefs.getInt("ui_migration", 0) < 9) {
             prefs.edit()
                 .putBoolean(AppPrefs.KEY_KEEP_AWAKE, true)
-                .putInt("ui_migration", 8)
+                .putInt("ui_migration", 9)
                 .apply()
         }
 
@@ -68,61 +72,128 @@ class MainActivity : Activity(),
 
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(dp(22), dp(28), dp(22), dp(34))
+            setPadding(dp(20), dp(22), dp(20), dp(30))
         }
         scroll.addView(root)
 
-        root.addView(TextView(this).apply {
-            text = "Halo Telefon"
-            textSize = 32f
-            setTextColor(ink)
-            setTypeface(typeface, Typeface.BOLD)
-        })
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
 
-        root.addView(TextView(this).apply {
-            text = "●  100% OFFLINE"
-            textSize = 13f
-            setTextColor(green)
+        header.addView(
+            TextView(this).apply {
+                text = "☎"
+                textSize = 24f
+                gravity = Gravity.CENTER
+                setTextColor(Color.WHITE)
+                background = gradient(
+                    intArrayOf(accent, accentDark),
+                    18f
+                )
+            },
+            LinearLayout.LayoutParams(
+                dp(54),
+                dp(54)
+            )
+        )
+
+        val titleWrap = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), 0, 0, 0)
+        }
+
+        titleWrap.addView(
+            TextView(this).apply {
+                text = "Halo Telefon"
+                textSize = 29f
+                setTextColor(ink)
+                setTypeface(typeface, Typeface.BOLD)
+            }
+        )
+
+        titleWrap.addView(
+            TextView(this).apply {
+                text = "Glasovno pozivanje bez dodirivanja ekrana"
+                textSize = 13f
+                setTextColor(muted)
+                setPadding(0, dp(2), 0, 0)
+            }
+        )
+
+        header.addView(
+            titleWrap,
+            LinearLayout.LayoutParams(
+                0,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                1f
+            )
+        )
+
+        root.addView(header)
+
+        livePill = TextView(this).apply {
+            textSize = 12f
             setTypeface(typeface, Typeface.BOLD)
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            background = rounded(greenSoft, 99f)
-        }, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply {
-            topMargin = dp(10)
-            bottomMargin = dp(24)
-        })
+            gravity = Gravity.CENTER
+            setPadding(dp(12), dp(7), dp(12), dp(7))
+        }
+
+        root.addView(
+            livePill,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = dp(16)
+                bottomMargin = dp(14)
+            }
+        )
 
         val statusCard = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(dp(20), dp(30), dp(20), dp(28))
-            background = rounded(surface, 28f)
-            elevation = dp(2).toFloat()
+            setPadding(dp(22), dp(24), dp(22), dp(22))
+            background = gradient(
+                intArrayOf(accentDark, accent),
+                28f
+            )
+            elevation = dp(6).toFloat()
         }
 
+        statusCard.addView(
+            TextView(this).apply {
+                text = "STATUS"
+                textSize = 11f
+                letterSpacing = 0.12f
+                setTextColor(Color.argb(205, 255, 255, 255))
+                setTypeface(typeface, Typeface.BOLD)
+            }
+        )
+
         statusOverlay = TextView(this).apply {
-            textSize = 27f
-            gravity = Gravity.CENTER
-            setTextColor(accent)
+            textSize = 28f
+            setTextColor(Color.WHITE)
             setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, dp(10), 0, 0)
         }
         statusCard.addView(statusOverlay)
 
         statusDetail = TextView(this).apply {
-            textSize = 15f
-            gravity = Gravity.CENTER
-            setTextColor(muted)
-            setPadding(0, dp(14), 0, 0)
+            textSize = 14f
+            setTextColor(Color.argb(220, 255, 255, 255))
+            setPadding(0, dp(12), 0, 0)
         }
         statusCard.addView(statusDetail)
 
-        root.addView(statusCard, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT
-        ).apply { bottomMargin = dp(18) })
+        root.addView(
+            statusCard,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                bottomMargin = dp(16)
+            }
+        )
 
         mainButton = Button(this).apply {
             isAllCaps = false
@@ -130,11 +201,14 @@ class MainActivity : Activity(),
             setTypeface(typeface, Typeface.BOLD)
             setTextColor(Color.WHITE)
             background = rounded(accent, 18f)
+            elevation = dp(2).toFloat()
+
             setOnClickListener {
-                val running = prefs.getBoolean(
-                    AppPrefs.KEY_SERVICE_RUNNING,
-                    false
-                )
+                val running =
+                    prefs.getBoolean(
+                        AppPrefs.KEY_SERVICE_RUNNING,
+                        false
+                    )
 
                 if (running) {
                     startService(
@@ -155,72 +229,195 @@ class MainActivity : Activity(),
                 }
             }
         }
-        root.addView(mainButton, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            dp(58)
-        ).apply { bottomMargin = dp(12) })
 
-        root.addView(Button(this).apply {
-            text = "Podešavanja"
-            isAllCaps = false
-            textSize = 16f
-            setTypeface(typeface, Typeface.BOLD)
-            setTextColor(accent)
-            background = outlined(surface, accent, 18f)
-            setOnClickListener {
-                startActivity(
-                    Intent(
-                        this@MainActivity,
-                        SettingsActivity::class.java
-                    )
-                )
+        root.addView(
+            mainButton,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(58)
+            ).apply {
+                bottomMargin = dp(10)
             }
-        }, LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            dp(54)
-        ))
+        )
 
-        root.addView(TextView(this).apply {
-            text =
-                "U mirovanju mikrofon sluša samo lokalnu wake frazu „Halo telefon“. " +
-                    "Whisper se pokreće tek nakon wake fraze."
-            textSize = 13f
-            gravity = Gravity.CENTER
-            setTextColor(muted)
-            setPadding(dp(10), dp(22), dp(10), 0)
-        })
+        root.addView(
+            Button(this).apply {
+                text = "Podešavanja i učenje glasa"
+                isAllCaps = false
+                textSize = 15f
+                setTypeface(typeface, Typeface.BOLD)
+                setTextColor(ink)
+                background = outlined(
+                    surface,
+                    line,
+                    18f
+                )
+                setOnClickListener {
+                    startActivity(
+                        Intent(
+                            this@MainActivity,
+                            SettingsActivity::class.java
+                        )
+                    )
+                }
+            },
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                dp(54)
+            )
+        )
 
-        root.addView(TextView(this).apply {
-            text = "v0.20  •  glasovni izbor kontakta • naučene kratke komande"
-            textSize = 12f
-            gravity = Gravity.CENTER
-            setTextColor(muted)
-            setPadding(dp(8), dp(26), dp(8), 0)
-        })
+        val guide = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(17), dp(18), dp(16))
+            background = outlined(
+                surface,
+                line,
+                22f
+            )
+        }
+
+        guide.addView(
+            TextView(this).apply {
+                text = "Kako radi"
+                textSize = 17f
+                setTextColor(ink)
+                setTypeface(typeface, Typeface.BOLD)
+            }
+        )
+
+        guide.addView(stepRow("1", "Reci „Halo telefon“", "Aktivira slušanje imena."))
+        guide.addView(stepRow("2", "Izgovori ime", "Aplikacija pronalazi najbolje kontakte."))
+        guide.addView(stepRow("3", "Reci „prvi“, „drugi“…", "Ili reci „otkaži“ u bilo kom trenutku."))
+
+        root.addView(
+            guide,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                topMargin = dp(18)
+            }
+        )
+
+        root.addView(
+            TextView(this).apply {
+                text = "Sve radi lokalno na telefonu. Glas se ne šalje na internet."
+                textSize = 12.5f
+                gravity = Gravity.CENTER
+                setTextColor(muted)
+                setPadding(dp(12), dp(18), dp(12), 0)
+            }
+        )
+
+        root.addView(
+            TextView(this).apply {
+                text = "v0.21"
+                textSize = 12f
+                gravity = Gravity.CENTER
+                setTextColor(Color.rgb(156, 163, 175))
+                setPadding(dp(8), dp(16), dp(8), 0)
+            }
+        )
 
         return scroll
     }
 
-    private fun refresh() {
-        val running = prefs.getBoolean(
-            AppPrefs.KEY_SERVICE_RUNNING,
-            false
-        )
+    private fun stepRow(
+        number: String,
+        title: String,
+        subtitle: String
+    ): LinearLayout =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(14), 0, 0)
 
-        val raw = prefs.getString(
-            AppPrefs.KEY_STATUS,
-            "Spreman"
-        ) ?: "Spreman"
+            addView(
+                TextView(this@MainActivity).apply {
+                    text = number
+                    textSize = 14f
+                    gravity = Gravity.CENTER
+                    setTextColor(accent)
+                    setTypeface(typeface, Typeface.BOLD)
+                    background = rounded(accentSoft, 99f)
+                },
+                LinearLayout.LayoutParams(
+                    dp(36),
+                    dp(36)
+                )
+            )
+
+            addView(
+                LinearLayout(this@MainActivity).apply {
+                    orientation = LinearLayout.VERTICAL
+                    setPadding(dp(12), 0, 0, 0)
+
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = title
+                            textSize = 15f
+                            setTextColor(ink)
+                            setTypeface(typeface, Typeface.BOLD)
+                        }
+                    )
+
+                    addView(
+                        TextView(this@MainActivity).apply {
+                            text = subtitle
+                            textSize = 12.5f
+                            setTextColor(muted)
+                            setPadding(0, dp(2), 0, 0)
+                        }
+                    )
+                },
+                LinearLayout.LayoutParams(
+                    0,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    1f
+                )
+            )
+        }
+
+    private fun refresh() {
+        val running =
+            prefs.getBoolean(
+                AppPrefs.KEY_SERVICE_RUNNING,
+                false
+            )
+
+        val raw =
+            prefs.getString(
+                AppPrefs.KEY_STATUS,
+                "Spreman"
+            ) ?: "Spreman"
 
         statusOverlay.text =
             humanStatus(running, raw)
 
         statusDetail.text =
             if (!running) {
-                "Pritisni Pokreni. Zatim koristi „Halo telefon“ za svaki novi poziv."
+                "Pokreni slušanje, pa za svaki novi poziv reci „Halo telefon“."
             } else {
                 raw
             }
+
+        livePill.text =
+            if (running) {
+                "●  SLUŠANJE AKTIVNO"
+            } else {
+                "●  SPREMNO"
+            }
+
+        livePill.setTextColor(
+            if (running) green else muted
+        )
+
+        livePill.background =
+            rounded(
+                if (running) greenSoft else surface,
+                99f
+            )
 
         mainButton.text =
             if (running) {
@@ -232,7 +429,7 @@ class MainActivity : Activity(),
         mainButton.background =
             rounded(
                 if (running) {
-                    Color.rgb(58, 58, 67)
+                    Color.rgb(31, 41, 55)
                 } else {
                     accent
                 },
@@ -244,74 +441,90 @@ class MainActivity : Activity(),
         running: Boolean,
         raw: String
     ): String {
-        if (!running) return "SPREMNO"
+        if (!running) {
+            return "Spreman"
+        }
 
         return when {
             raw.contains("TRAŽIM KONTAKT", true) ->
-                "TRAŽIM KONTAKT…"
+                "Tražim kontakt…"
 
             raw.contains("PREPOZNAJEM", true) ->
-                "PREPOZNAJEM…\nSAČEKAJ"
+                "Prepoznajem…"
 
             raw.contains("SLUŠAM IME", true) ||
                 raw.contains("Čujem ime", true) ->
-                "SLUŠAM IME…"
+                "Slušam ime…"
 
             raw.contains("RECI IME", true) ||
                 raw.contains("Posle tona", true) ->
-                "RECI IME"
+                "Reci ime"
 
             raw.contains("PROVERAVAM", true) ||
                 raw.contains("Proveravam", true) ->
-                "PROVERAVAM KOMANDU…"
+                "Proveravam komandu…"
 
             raw.contains("IZABERI", true) ->
-                "IZABERI KONTAKT"
+                "Izaberi kontakt"
 
             raw.contains("OZNAČEN", true) ||
                 raw.contains("Izabrano", true) ||
                 raw.contains("ZOVI /", true) ->
-                "ČEKAM POTVRDU"
+                "Čekam potvrdu"
 
             raw.contains("Pozivam", true) ->
-                raw.uppercase()
+                raw
 
             raw.contains("Otkazano", true) ||
                 raw.contains("Istekao izbor", true) ->
-                "OTKAZANO\nČEKAM: „HALO TELEFON“"
+                "Otkazano"
 
             raw.contains("HALO TELEFON", true) ||
                 raw.contains("Halo telefon", true) ->
-                "ČEKAM:\n„HALO TELEFON“"
+                "Čekam „Halo telefon“"
 
             else ->
                 raw.substringBefore(".")
-                    .uppercase()
-                    .take(48)
+                    .take(52)
         }
     }
 
     private fun ensurePermissions(): Boolean {
-        val missing = requiredPermissions.filter {
-            checkSelfPermission(it) !=
-                PackageManager.PERMISSION_GRANTED
-        }
+        val missing =
+            requiredPermissions.filter {
+                checkSelfPermission(it) !=
+                    PackageManager.PERMISSION_GRANTED
+            }
 
         if (missing.isNotEmpty()) {
             requestPermissions(
                 missing.toTypedArray(),
                 42
             )
+
             Toast.makeText(
                 this,
-                "Dozvoli mikrofon, kontakte i pozivanje, pa pritisni ponovo.",
+                "Dozvoli mikrofon, kontakte i pozivanje, pa pokušaj ponovo.",
                 Toast.LENGTH_LONG
             ).show()
+
             return false
         }
 
         return true
     }
+
+    private fun gradient(
+        colors: IntArray,
+        radiusDp: Float
+    ): GradientDrawable =
+        GradientDrawable(
+            GradientDrawable.Orientation.TL_BR,
+            colors
+        ).apply {
+            cornerRadius =
+                dp(radiusDp.toInt()).toFloat()
+        }
 
     private fun rounded(
         color: Int,
@@ -340,7 +553,7 @@ class MainActivity : Activity(),
             value *
                 resources.displayMetrics.density +
                 0.5f
-            ).toInt()
+        ).toInt()
 
     override fun onSharedPreferenceChanged(
         sharedPreferences: SharedPreferences?,
@@ -350,7 +563,9 @@ class MainActivity : Activity(),
             key == AppPrefs.KEY_STATUS ||
             key == AppPrefs.KEY_SERVICE_RUNNING
         ) {
-            runOnUiThread { refresh() }
+            runOnUiThread {
+                refresh()
+            }
         }
     }
 
