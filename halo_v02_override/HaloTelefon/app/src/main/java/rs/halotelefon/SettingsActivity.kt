@@ -155,7 +155,7 @@ class SettingsActivity : Activity(),
 
         commandCard.addView(
             TextView(this).apply {
-                text = "Savet: reci kratku reč jasno, ali bez razvlačenja. v0.21 prihvata i kraće izgovore."
+                text = "Savet: reci kratku reč jasno, ali bez razvlačenja. v0.22 prihvata i kraće izgovore."
                 textSize = 12.5f
                 setTextColor(muted)
                 setPadding(0, dp(10), 0, 0)
@@ -264,7 +264,7 @@ class SettingsActivity : Activity(),
 
         root.addView(
             TextView(this).apply {
-                text = "Halo Telefon  •  v0.21"
+                text = "Halo Telefon  •  v0.22"
                 textSize = 12f
                 gravity = Gravity.CENTER
                 setTextColor(Color.rgb(156, 163, 175))
