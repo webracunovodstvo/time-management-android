@@ -34,6 +34,8 @@ class VoiceDialService : Service() {
         const val EXTRA_LOOKUP_KEY = "lookupKey"
         const val EXTRA_NAME = "name"
         const val EXTRA_NUMBER = "number"
+        const val EXTRA_SESSION_ID = "sessionId"
+        const val EXTRA_SPOKEN = "spoken"
 
         private const val CHANNEL_ID = "halo_voice"
         private const val NOTIFICATION_ID = 1001
@@ -57,6 +59,7 @@ class VoiceDialService : Service() {
 
     private var selectedContact: ContactPhone? = null
     private var selectedSpoken: String = ""
+    private var selectedCallSessionId: String = ""
     private var pendingCandidates: List<ContactCandidate> = emptyList()
     private var trainRemaining = 0
     private var commandTrainingIndex = 0
@@ -143,6 +146,7 @@ class VoiceDialService : Service() {
                 nameInferencePending = false
                 selectedContact = null
                 selectedSpoken = ""
+                selectedCallSessionId = ""
                 pendingCandidates = emptyList()
                 segmentQueue.clear()
 
@@ -225,25 +229,71 @@ class VoiceDialService : Service() {
             }
 
             ACTION_SELECT_CANDIDATE -> {
-                val key = intent.getStringExtra(EXTRA_LOOKUP_KEY).orEmpty()
-                val name = intent.getStringExtra(EXTRA_NAME).orEmpty()
-                val number = intent.getStringExtra(EXTRA_NUMBER).orEmpty()
+                val key =
+                    intent.getStringExtra(
+                        EXTRA_LOOKUP_KEY
+                    ).orEmpty()
 
-                if (key.isNotBlank() && name.isNotBlank() && number.isNotBlank()) {
-                    selectedContact = ContactPhone(key, name, number)
+                val name =
+                    intent.getStringExtra(
+                        EXTRA_NAME
+                    ).orEmpty()
+
+                val number =
+                    intent.getStringExtra(
+                        EXTRA_NUMBER
+                    ).orEmpty()
+
+                val session =
+                    intent.getStringExtra(
+                        EXTRA_SESSION_ID
+                    ).orEmpty()
+
+                val spoken =
+                    intent.getStringExtra(
+                        EXTRA_SPOKEN
+                    ).orEmpty()
+
+                if (
+                    key.isNotBlank() &&
+                    name.isNotBlank() &&
+                    number.isNotBlank()
+                ) {
+                    selectedContact =
+                        ContactPhone(
+                            key,
+                            name,
+                            number
+                        )
+
+                    selectedCallSessionId =
+                        session
+
+                    selectedSpoken =
+                        spoken
+
                     acquireInteractionScreenLock()
                     mode = Mode.WAIT_CONFIRM
                     nameInferencePending = false
                     segmentQueue.clear()
+
+                    AppPrefs.setLastMatch(
+                        this,
+                        "Izabran: $name"
+                    )
+
                     AppPrefs.setStatus(
                         this,
-                        "Izabrano: " + name +
-                            ". Reci ZOVI / MOŽE / OK / OTKAŽI ili ponovo ‘HALO TELEFON’."
+                        "Izabran: $name. Reci OKEJ za poziv."
                     )
+
                     updateServiceNotification(
-                        "ZOVI / MOŽE / OK / OTKAŽI • HALO TELEFON = novo ime"
+                        "Izabran: $name • reci OKEJ"
                     )
-                    if (running) beepReady()
+
+                    if (running) {
+                        beepReady()
+                    }
                 }
             }
         }
@@ -575,7 +625,7 @@ class VoiceDialService : Service() {
                                 if (currentMode == Mode.WAIT_SELECT) {
                                     "Slušam PRVI / DRUGI / TREĆI / ČETVRTI / PETI / OTKAŽI"
                                 } else {
-                                    "Slušam ZOVI / MOŽE / OK / OTKAŽI / HALO TELEFON"
+                                    "Slušam OKEJ"
                                 }
                             )
                         }
@@ -594,7 +644,7 @@ class VoiceDialService : Service() {
                                 if (currentMode == Mode.WAIT_SELECT) {
                                     "Izaberi broj kontakta glasom"
                                 } else {
-                                    "Čekam potvrdu • HALO TELEFON = novo ime"
+                                    "Čekam OKEJ za poziv"
                                 }
                             )
                             continue
@@ -824,6 +874,51 @@ class VoiceDialService : Service() {
         audio: FloatArray
     ) {
         nameInferencePending = false
+
+        if (mode == Mode.WAIT_CONFIRM) {
+            val commandText =
+                transcribeShort(
+                    audio,
+                    "Komanda: okej.",
+                    "potvrda OKEJ"
+                )
+
+            if (
+                isOkayConfirmation(
+                    commandText
+                )
+            ) {
+                AppPrefs.setLastHeard(
+                    this,
+                    commandText
+                )
+                confirmSelectedCall()
+            } else {
+                AppPrefs.setNameDebug(
+                    this,
+                    "Čuo sam: " +
+                        if (
+                            commandText.isBlank()
+                        ) {
+                            "(prazno)"
+                        } else {
+                            commandText
+                        } +
+                        " • čekam OKEJ"
+                )
+
+                AppPrefs.setStatus(
+                    this,
+                    confirmationStatus()
+                )
+
+                updateServiceNotification(
+                    "Čekam OKEJ za poziv"
+                )
+            }
+
+            return
+        }
 
         val allowed =
             buildSet {
@@ -1149,8 +1244,7 @@ class VoiceDialService : Service() {
     }
 
     private fun confirmationStatus(): String =
-        "Čekam ZOVI / MOŽE / OK / OTKAŽI. " +
-            "Za novi kontakt reci ‘HALO TELEFON’."
+        "Kontakt je izabran. Reci OKEJ za poziv."
 
     private fun transcribeShort(
         audio: FloatArray,
@@ -1229,6 +1323,34 @@ class VoiceDialService : Service() {
         }
 
         return hasHalo && hasTelefon
+    }
+
+    private fun isOkayConfirmation(
+        raw: String
+    ): Boolean {
+        val normalized =
+            normalizeCommand(raw)
+
+        if (normalized.isBlank()) {
+            return false
+        }
+
+        return normalized
+            .split(' ')
+            .filter {
+                it.isNotBlank()
+            }
+            .any { word ->
+                word == "ok" ||
+                    word == "okej" ||
+                    word == "okay" ||
+                    word == "oke" ||
+                    word == "okey" ||
+                    editDistanceAtMostOne(
+                        word,
+                        "okej"
+                    )
+            }
     }
 
     private fun isConfirmation(raw: String): Boolean {
@@ -1451,29 +1573,81 @@ class VoiceDialService : Service() {
     }
 
     private fun confirmSelectedCall() {
-        val contact = selectedContact
+        val contact =
+            selectedContact
 
         if (contact == null) {
-            mode = Mode.WAIT_NAME
+            mode = Mode.WAIT_WAKE
             AppPrefs.setStatus(
                 this,
-                "Nema izabranog kontakta. Izgovori ime ponovo."
+                "Nema izabranog kontakta. Reci ‘Halo telefon’ za novu pretragu."
             )
-            updateServiceNotification("Reci ime ponovo")
+            updateServiceNotification(
+                "ČEKAM: ‘HALO TELEFON’"
+            )
             beepError()
             return
         }
 
         if (
-            checkSelfPermission(Manifest.permission.CALL_PHONE) !=
+            checkSelfPermission(
+                Manifest.permission.CALL_PHONE
+            ) !=
             PackageManager.PERMISSION_GRANTED
         ) {
-            AppPrefs.setStatus(this, "Nema dozvole za pozivanje")
+            AppPrefs.setStatus(
+                this,
+                "Nema dozvole za pozivanje"
+            )
             beepError()
             return
         }
 
-        if (selectedSpoken.isNotBlank()) {
+        val prefs =
+            AppPrefs.prefs(this)
+
+        val session =
+            selectedCallSessionId
+
+        val consumed =
+            prefs.getString(
+                "last_consumed_call_session",
+                ""
+            ).orEmpty()
+
+        if (
+            session.isNotBlank() &&
+            consumed == session
+        ) {
+            selectedContact = null
+            selectedSpoken = ""
+            selectedCallSessionId = ""
+            mode = Mode.WAIT_WAKE
+            segmentQueue.clear()
+            releaseInteractionScreenLock()
+
+            AppPrefs.setStatus(
+                this,
+                "Poziv je već pokrenut. ČEKAM: ‘HALO TELEFON’"
+            )
+            updateServiceNotification(
+                "ČEKAM: ‘HALO TELEFON’"
+            )
+            return
+        }
+
+        if (session.isNotBlank()) {
+            prefs.edit()
+                .putString(
+                    "last_consumed_call_session",
+                    session
+                )
+                .apply()
+        }
+
+        if (
+            selectedSpoken.isNotBlank()
+        ) {
             runCatching {
                 learningStore.record(
                     selectedSpoken,
@@ -1484,32 +1658,62 @@ class VoiceDialService : Service() {
 
         AppPrefs.setLastMatch(
             this,
-            "Potvrđeno: " + contact.displayName
+            "Potvrđeno OKEJ: " +
+                contact.displayName
         )
+
         AppPrefs.setStatus(
             this,
-            "Pozivam " + contact.displayName
+            "Pozivam " +
+                contact.displayName
         )
 
         sendBroadcast(
-            Intent(CandidateActivity.ACTION_CLOSE_PICKER)
-                .setPackage(packageName)
+            Intent(
+                CandidateActivity.ACTION_CLOSE_PICKER
+            ).setPackage(
+                packageName
+            )
         )
 
-        getSystemService(NotificationManager::class.java)
-            .cancel(CANDIDATE_NOTIFICATION_ID)
+        getSystemService(
+            NotificationManager::class.java
+        ).cancel(
+            CANDIDATE_NOTIFICATION_ID
+        )
 
         selectedContact = null
         selectedSpoken = ""
+        selectedCallSessionId = ""
         pendingCandidates = emptyList()
         mode = Mode.WAIT_WAKE
-        releaseInteractionScreenLock()
-        wakeAllowedAtMs =
-            SystemClock.elapsedRealtime() + 1_200L
-        updateServiceNotification("Slušam: ‘Halo telefon’")
-        beepSuccess()
+        nameInferencePending = false
+        segmentQueue.clear()
 
-        CallPlacer.call(this, contact.number)
+        ignoreAudioUntilMs =
+            SystemClock.elapsedRealtime() +
+                2_500L
+
+        releaseInteractionScreenLock()
+
+        updateServiceNotification(
+            "Poziv u toku • slušanje pauzirano"
+        )
+
+        val appContext =
+            applicationContext
+
+        Thread(
+            {
+                runCatching {
+                    CallPlacer.call(
+                        appContext,
+                        contact.number
+                    )
+                }
+            },
+            "HaloTelefon-PlaceCall"
+        ).start()
     }
 
     private fun handleWake(audio: FloatArray) {
@@ -1795,7 +1999,7 @@ class VoiceDialService : Service() {
 
         AppPrefs.setStatus(
             this,
-            "Lista je otvorena. Dodirni kontakt za poziv."
+            "Lista je otvorena. Izaberi kontakt, pa reci OKEJ."
         )
         updateServiceNotification(
             "ČEKAM: ‘HALO TELEFON’"
@@ -1932,7 +2136,7 @@ class VoiceDialService : Service() {
             }
 
         return chosen
-            .take(80)
+            
             .map {
                 ContactCandidate(
                     contact = it.contact,
@@ -2104,7 +2308,7 @@ class VoiceDialService : Service() {
                 .distinctBy {
                     it.contact.lookupKey
                 }
-                .take(80)
+                
 
         val names =
             ArrayList(
