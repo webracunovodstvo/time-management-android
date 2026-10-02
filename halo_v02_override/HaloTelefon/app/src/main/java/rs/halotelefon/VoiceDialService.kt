@@ -531,7 +531,7 @@ class VoiceDialService : Service() {
 
                         if (
                             segment != null &&
-                            segment.size >= 3_200
+                            segment.size >= 2_400
                         ) {
                             nameInferencePending = true
                             AppPrefs.setStatus(
@@ -623,7 +623,7 @@ class VoiceDialService : Service() {
 
                         if (
                             segment != null &&
-                            segment.size >= 3_200
+                            segment.size >= 2_400
                         ) {
                             handleCommandTraining(
                                 segment
@@ -760,7 +760,10 @@ class VoiceDialService : Service() {
                     LearnedVoiceCommand.CANCEL
                 )
 
-                if (pendingCandidates.isNotEmpty()) {
+                if (
+                    mode == Mode.WAIT_SELECT &&
+                    pendingCandidates.isNotEmpty()
+                ) {
                     LearnedVoiceCommand.values()
                         .filter {
                             it.candidateIndex != null &&
@@ -778,6 +781,24 @@ class VoiceDialService : Service() {
                     allowed
                 )
             }.getOrNull()
+
+        if (learned != null) {
+            AppPrefs.setNameDebug(
+                this,
+                "Lokalna komanda: " +
+                    (learned.command?.spokenLabel ?: "?") +
+                    " • " +
+                    if (learned.matched) {
+                        "PRIHVAĆENA " + learned.confidence + "%"
+                    } else {
+                        "nije sigurna"
+                    } +
+                    " • d=" +
+                    "%.2f".format(learned.distance) +
+                    " / " +
+                    "%.2f".format(learned.threshold)
+            )
+        }
 
         if (learned?.matched == true) {
             when (val command = learned.command) {
