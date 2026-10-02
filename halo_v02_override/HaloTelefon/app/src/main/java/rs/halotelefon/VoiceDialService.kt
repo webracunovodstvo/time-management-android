@@ -98,6 +98,18 @@ class VoiceDialService : Service() {
         acousticWakeStore = AcousticWakeStore(this)
         acousticCommandStore = AcousticCommandStore(this)
         learningStore = LearningStore(this)
+
+        // V0.21 accepts much shorter command samples. Discard the v0.20
+        // command profile once so clipped/invalid old samples do not keep
+        // causing failed PRVI/DRUGI/OTKAŽI matches after an app update.
+        val prefs = AppPrefs.prefs(this)
+        if (prefs.getInt("command_profile_version", 0) < 21) {
+            acousticCommandStore.clearAll()
+            prefs.edit()
+                .putInt("command_profile_version", 21)
+                .apply()
+        }
+
         AppPrefs.setCommandProfile(
             this,
             acousticCommandStore.summary()
